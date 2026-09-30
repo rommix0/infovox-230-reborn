@@ -1,0 +1,25 @@
+# build outputs (make) and release builds (make dist)
+/build/
+/dist/
+
+# regenerable analysis outputs (see AGENTS.md "Tools")
+/tools/full.asm
+/tools/xref.json
+/tools/ops.txt
+/tools/handlers.txt
+/tools/out/
+
+# Ghidra project database (names and types live in tools/ghidra/, applied by IvxApply.java)
+/ivx_ghidra/
+
+# Python
+__pycache__/
+*.pyc
+
+# tool and agent state
+/session_memory.json
+/.superpowers/
+.claude/settings.local.json
+
+# infovox original binaries
+/bin/

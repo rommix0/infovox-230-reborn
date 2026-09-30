@@ -1,0 +1,334 @@
+# Ivx230nt.dll symbol table, applied by IvxApply.java.  Source of truth: REFERENCE.md.
+# columns (TAB separated): addr  kind(func|data|label)  name  prototype-or-type ('-' = none)  comment
+# prototypes use Ghidra type names (Core *, Seg *, Synth * ... from ivx_types.h).
+#
+# ---- runtime / helpers ----
+1000f300	func	mem_calloc	void * mem_calloc(int n, int size)	wraps CRT calloc [CONFIRMED]
+1000f320	func	mem_free	void mem_free(void *p)	NULL-safe CRT free [CONFIRMED]
+1002f920	func	_calloc	-	MSVC CRT [LIKELY]
+1002d400	func	_free	-	MSVC CRT [LIKELY]
+100308a0	func	_memcpy	-	MSVC CRT asm memcpy; used by synt_select_map (dst,src,n) [LIKELY]
+10030be0	func	_CIexp	-	CRT exp (synth tables only)
+10030c19	func	_CIpow	-	CRT pow
+10030e34	func	_CIcos	-	CRT cos
+10030ee4	func	_CIsqrt	-	CRT sqrt
+#
+# ---- SAPI engine glue ----
+1000f870	func	eng_wpm_to_rate_idx	-	SpeedSet: wpm (15..500) -> index into wpm_rate_table (wpm*100/150)
+1000f8b0	func	eng_rate_to_wpm	-	inverse of eng_wpm_to_rate_idx
+10010e40	func	eng_cb_userdict	-	callback passed to tts_ctrl 0x14 (Core.cb_userdict): looks the word up in the engine's lexicon object, returns 1 (text) on a hit, else 0; never 2 [CONFIRMED]
+10010fe0	func	eng_cb_bookmark	-	callback passed to tts_ctrl 0x1f (Core.cb_bookmark) [LIKELY]
+10011270	func	eng_cb_wordpos	-	callback passed to tts_ctrl 0x1a (Core.cb_wordpos) [LIKELY]
+10016490	func	CLangResource_Load	-	reads .ivx file, calls tts_ctrl(NULL,0x21,buf+0x200)
+10016cc0	func	eng_load_language_library	-	LoadLibraryA(LibraryFile)+GetProcAddress(ord 1) -> darules.dll!norm; the proc is kept at +0x110 and installed as the exception dictionary (tts_ctrl 0x15) [LIKELY]
+10016d40	func	eng_library_proc	-	returns the LibraryFile object's ordinal-1 function (+0x110); 0x10010334 passes it to tts_ctrl 0x15, the exception dictionary, or 0 without one [LIKELY]
+10016fe3	label	GetDiphoneResource_site	-	MBROLA/diphone path [unknown]
+#
+# ---- RULSYS: opbatch.c (0x10019780) ----
+10019780	func	opb_init	short opb_init(Core *src, Core **out)	calloc a Core and copy src output config (A1-A3, tracks raw, voice, outval...; not user_voice) [CONFIRMED, port src/opbatch.c]
+100199e0	func	opb_restore	short opb_restore(Core *c, OpBatch *b)	b->list becomes c->segs (first->prev = &segs.tail, DLL quirk), out emptied unfreed, reload A1-A3, op_start_utterance; -1 if empty [CONFIRMED]
+10019af0	func	opb_save	short opb_save(Core *c, OpBatch **out)	copy segs + ItemBlks into one node array (list order), free them; first ItemBlk copy keeps its old prev; empty segs leaves list.tail.prev uninitialised [CONFIRMED]
+10019cc0	func	opb_free	short opb_free(OpBatch *b)	-
+10019cf0	func	opb_size	int opb_size(OpBatch *b)	returns b->size, -1 if NULL
+10019d00	func	opb_copy_config	short opb_copy_config(Core *src, Core *dst)	opb_init copy into an existing Core; -1 if dst NULL
+#
+# ---- RULSYS: ttsctrl.c (0x10019f50) ----
+10019f50	func	tts_ctrl	int tts_ctrl(void *h, int cmd, void *arg)	tail-dispatch through tts_cmd_table (0x00..0x21), no bounds check [CONFIRMED, port src/ttsctrl.c]
+10019f70	func	tts_create	int tts_create(Core **out, short npool)	cmd 0x00: calloc Core (0xEB0) + npool*0x38 pool (failure leaks the Core); ntotal 0x20, V_init = 50, user voices 5..9 = 32 words of voice 0; tts_c02_reset(0) [CONFIRMED]
+1001a0c0	func	tts_c01_destroy	int tts_c01_destroy(Core *c)	cmd 0x01: free pool and Core
+1001a0f0	func	tts_c02_reset	int tts_c02_reset(Core *c, int what)	cmd 0x02: 0 = all (core_init_lists, esc_phon 2, esc_mark 1, f6d9 0x20, mode 8, charset 0, xlat_hi = NULL until the next bind, voice 0), 2 = output (fead, ivx_load_param_tables), 1 = text (tp_reset_text, word_pos) [CONFIRMED]
+1001a1b0	func	tts_c03_bind	int tts_c03_bind(Core *c, IvxBody *body)	cmd 0x03: (short)ivx_bind, then tp_reset_text and ivx_load_param_tables (of the old language if the bind fails); -1 queries c->ivx [CONFIRMED]
+1001a2a0	func	tts_c04_charset	int tts_c04_charset(Core *c, int flags)	cmd 0x04: charset = flags; without bit 4 chars 0x20..0x7e of class 0x1000 -> 0x1020, 0x2000 -> 0x2100; with bit 4 they become letters (0x3000 bits | 0x600 a..}, 0xa00 A..], else 0x200); -1 queries [CONFIRMED]
+1001a200	func	tts_c05_mode	int tts_c05_mode(Core *c, int flags)	cmd 0x05: mode = flags (0 -> 8; 2 -> |1; 0x1f0 without 4 -> |8); f6dc = bit 0x80; pending = 0; tp_state = 1 (phonetic input) if bit 0x100 else 0; -1 queries (short) [CONFIRMED]
+1001a380	func	tts_c06_set_voice	int tts_c06_set_voice(Core *c, int voice)	cmd 0x06: voice_next = tts_voice_defaults[0..4] or user_voice[5..9] (ntotal words); ui_rate = DR<10 ? 5DR : 2DR+30, ui_fd = (2FD+300)/6, ui_pitch = 2F0/5, voice_dirty; else -1; -1 queries [CONFIRMED]
+1001a480	func	tts_c07_store_voice	int tts_c07_store_voice(Core *c, int voice)	cmd 0x07: user_voice[voice-5] = voice_next for 5..9, voice_no = voice; else -1 [CONFIRMED]
+1001a4e0	func	tts_c08_fd	int tts_c08_fd(Core *c, int v)	cmd 0x08: ui_fd = tts_ui_adjust; voice_next FD = 3*(ui_fd-50); returns ui_fd; -1 queries [CONFIRMED]
+1001a540	func	tts_c09_rate	int tts_c09_rate(Core *c, int v)	cmd 0x09: ui_rate = tts_ui_adjust; voice_next DR = ui_rate/5 below 50, else (ui_rate-50)/2+10; returns ui_rate [CONFIRMED]
+1001a5c0	func	tts_c0a_pitch	int tts_c0a_pitch(Core *c, int v)	cmd 0x0a: ui_pitch = tts_ui_adjust; voice_next F0 = 5*ui_pitch/2 (64 = unity); returns ui_pitch [CONFIRMED]
+1001a620	func	tts_c0b_nop	int tts_c0b_nop(void)	cmd 0x0b and 0x0c
+1001a630	func	tts_c0d_var_init	int tts_c0d_var_init(Core *c, int arg)	cmd 0x0d: V_init[arg>>16] = (short)arg
+1001a650	func	tts_c0e_esc_mark	int tts_c0e_esc_mark(Core *c, int ch)	cmd 0x0e: bookmark escape char; 0x7f and 8 -> 0 (off); -1 queries
+1001a680	func	tts_c0f_esc_phon	int tts_c0f_esc_phon(Core *c, int ch)	cmd 0x0f: phonetic-input escape char
+1001a6b0	func	tts_c10_out_flags	int tts_c10_out_flags(Core *c, int flags)	cmd 0x10
+1001a6e0	func	tts_c11_cb_phonemes	int tts_c11_cb_phonemes(Core *c, void *fn)	cmd 0x11
+1001a700	func	tts_c12_p6ec	int tts_c12_p6ec(Core *c, void *p)	cmd 0x12
+1001a720	func	tts_c13_cb_status	int tts_c13_cb_status(Core *c, void *fn)	cmd 0x13
+1001a740	func	tts_c14_cb_userdict	int tts_c14_cb_userdict(Core *c, void *fn)	cmd 0x14
+1001a790	func	tts_c15_cb_excdict	int tts_c15_cb_excdict(Core *c, void *fn)	cmd 0x15
+1001a760	func	tts_c16_cb_arg	int tts_c16_cb_arg(Core *c, void *arg)	cmd 0x16
+1001a780	func	tts_c17_frames_left	int tts_c17_frames_left(Core *c)	cmd 0x17: (short)frames_left
+1001a7b0	func	tts_c18_hook	int tts_c18_hook(Core *c, void *fn)	cmd 0x18: Core.hook, called every hook_interval steps by cw_run; the SAPI engine passes 0x10011400 (0x10010e07) [CONFIRMED]
+1001a7d0	func	tts_c19_hook_interval	int tts_c19_hook_interval(Core *c, short n)	cmd 0x19 (engine passes 500)
+1001a7f0	func	tts_c1a_cb_wordpos	int tts_c1a_cb_wordpos(Core *c, void *fn)	cmd 0x1a
+1001a810	func	tts_c1b_word_pos	int tts_c1b_word_pos(Core *c, int v)	cmd 0x1b; -1 queries
+1001a840	func	tts_c1c_clear_count	int tts_c1c_clear_count(Core *c)	cmd 0x1c: count_init = 0, count = -count_init = 0
+1001a860	func	tts_c1d_out_mode	short * tts_c1d_out_mode(Core *c, short mode)	cmd 0x1d: returns &c->pdesc_n (parameter description block)
+1001a880	func	tts_c1e_feae	int tts_c1e_feae(Core *c, short v)	cmd 0x1e
+1001a8a0	func	tts_c1f_cb_bookmark	int tts_c1f_cb_bookmark(Core *c, void *fn)	cmd 0x1f
+1001a8c0	func	tts_c20_mark	int tts_c20_mark(Core *c, int mark)	cmd 0x20: mark+1 -> mark_hi = low word, low byte of mark_lo = bits 16..23 (high byte kept) [CONFIRMED]
+1001a8f0	func	tts_c21_ivx_swap	int tts_c21_ivx_swap(void *h, IvxBody *body)	cmd 0x21: byte-swap .ivx body in place: H[] dwords, 0x6a..0x6f, A1..A3 ((H8-0x70)/8 words each; A0 names stay bytes), phoneme records, sections H5 H6 H9..H12 up to the next (H12 up to H14 or H13), lexicon-less files the index at H13+0x80 (§5.1) [CONFIRMED, port src/ttsctrl.c]
+1001aa00	func	tts_ui_adjust	short tts_ui_adjust(short cur, short arg)	-2/-3 = +-1, -4/-5 = +-2, -6/-7 = +-5 (16-bit compare), else arg; clamp 0..100 [CONFIRMED]
+1001aa70	func	core_init_lists	void core_init_lists(Core *c)	segs/held/out empty (head.prev = &head, tail.next = &tail); every pool node linked into free_list, ext = NULL [CONFIRMED]
+1001ab40	func	ivx_bind	short ivx_bind(Core *c, IvxBody *body)	binds .ivx sections into Core (§5.2); NULL or build tag "XX" -> -1; frees p160; clears cb_excdict; pdesc_n = -1-nparams, pnames from A0 when A0[1] is 2 chars > 0x20 (strncpy, nparams-1 names reversed) else 24 built-in F1..ZZ; lexicon-less files: lex_index = H13+0x80, lexicon = H13+0x180 [CONFIRMED]
+1001ada0	func	ivx_build_class_flags	void ivx_build_class_flags(Core *c)	class codes (s8) -> class_flags: 0..0x7f from H13, 0x80..0xff from H14+0x100 or tp_class80; codes -6..5 -> 8,1,0x20,0x40,0x10,0x80,0x100,0x200,0x600,0xa00,0x1020,0x2100 (jump table 0x1001aeb4), else 0x200 (0x600 a..}, 0xa00 A..]); TAB/SP |= 2, . and 0x17 |= 0x10, LF FF CR |= 4 [CONFIRMED]
+1001aef0	func	tp_xlat_char	unsigned char tp_xlat_char(Core *c, unsigned char ch)	one char of the 2-char transliteration: ch|0x80 -> first, ch -> second char of ch|0x80; Core.xlat_hi else built-in tables by .ivx tag (SP/IT 0x10048668, FR patches, default 0x10048608, >=0xe0 0x100485e8) [CONFIRMED, port src/ttsctrl.c]
+1001afa0	func	tp_char_class	unsigned short tp_char_class(Core *c, unsigned int ch)	class flags of a char >= 0x80 through charset table 1 (0x10048508) or 2 (0x10048588) [CONFIRMED]
+1001aff0	func	swap16	void swap16(unsigned short *p, int n)	swap bytes of each word; n bytes rounded up to even
+1001b020	func	swap_halves32	void swap_halves32(unsigned int *p, int n)	swap 16-bit halves of each dword; n bytes rounded up to 4
+#
+# ---- RULSYS: tpchar.c (0x1001b050) text input state machine ----
+1001b050	func	tp_putc	int tp_putc(Core *c, unsigned char ch)	feed one char: 1 = utterance ready, 2 = synth busy (char pending), 0; runs tp_st* while text_cur < text_end, status -> cb_status; mode 1 = char mode (tp_speak_char flush); setjmp(jmpbuf) never longjmp-ed [CONFIRMED, port src/tpchar.c]
+1001b470	func	tp_st00_start	short tp_st00_start(Core *c)	state 0: CR CR -> ".", CR with < 40 free nodes -> end of text; full buffer -> append " ."; esc_mark -> 12, esc_phon -> 1, class 1 skip, 4 -> blank, 0x100 speak, 0x10 sentence end, 0x200 -> 3, else 8; demo nag jumped over at 0x1001b55f (cracked) [CONFIRMED]
+1001b55f	label	tp_demo_nag_skip	-	LICENSE: patched jmp over the demo nag (count < 0: tp_word "zdemo", tp_token_m1 "19..", sentence end every count_init sentences); cracked, not ported
+1001bb50	func	tp_st01_phonetic	short tp_st01_phonetic(Core *c)	state 1: phonetic input up to blank/punct/esc_phon; 8-bit chars transliterated in place; > 85 -> state 2; token -> tp_text_to_segs + ctl_word_end [CONFIRMED]
+1001beb0	func	tp_st02_phonetic_skip	short tp_st02_phonetic_skip(Core *c)	state 2: unusable phonetic input is spoken char by char up to esc_phon [CONFIRMED]
+1001b7b0	func	tp_st03_word	short tp_st03_word(Core *c)	state 3: letters -> tp_word; '-' -> 4; out of nodes or > 85 chars -> spell (7) [CONFIRMED]
+1001b880	func	tp_st04_hyphen	short tp_st04_hyphen(Core *c)	states 4/5: word-letter -> two words with the "hy" token (0x10048998) between; word-<line break> joins (mode 0x10: newline kept); else ends the word [CONFIRMED]
+1001ba40	func	tp_st06_skip_break	short tp_st06_skip_break(Core *c)	state 6: drop blanks/breaks after word-<break>, then back to 3 [CONFIRMED]
+1001bad0	func	tp_st07_spell	short tp_st07_spell(Core *c)	state 7: spell letters and hyphens one by one [CONFIRMED]
+1001bf80	func	tp_st08_token	short tp_st08_token(Core *c)	state 8: non-letter token -> tp_token_m1; class 0x40 separator -> 9; > 85 or out of nodes -> spell (10) [CONFIRMED]
+1001c120	func	tp_st09_num_sep	short tp_st09_num_sep(Core *c)	state 9: separator continues the token only before a digit (class 0x80) [CONFIRMED]
+1001c1e0	func	tp_st0a_spell	short tp_st0a_spell(Core *c)	state 10: spell a token char by char [CONFIRMED]
+1001c330	func	tp_st0b_spell_sep	short tp_st0b_spell_sep(Core *c)	state 11: separator inside a spelled token, spoken before a digit [CONFIRMED]
+1001c3c0	func	tp_st0c_mark	short tp_st0c_mark(Core *c)	states 12/13: esc_mark b1 b2 b3: mark_lo = hi byte kept | (signed)b1, mark_hi = b2<<8 | (signed)b3; 13 returns to phonetic input [CONFIRMED]
+1001c460	func	tp_reset_text	void tp_reset_text(Core *c)	empty text buffer (text_limit = text+0x2a0), clear marks/retry/state, count = -count_init, free segs and held [CONFIRMED]
+#
+# ---- RULSYS: opsmooth.c (0x1001c4f0) parameter tracks -> frames ----
+1001c4f0	func	op_next_frame	short * op_next_frame(Core *c)	one frame: voice_dirty -> voice, track 0 = segment clock (bookmark, phoneme cb at segment start), frame_gen, dispatch, voice[0] AC/AN/AH adjust; out_mode 0: &outval[4] with outval[4]=flags outval[0] (param 4 parked in out_save0); else &outval[3] = {bswap frame_no, bswap name} [CONFIRMED, port src/opsmooth.c]
+1001c810	func	op_frame_gen	void op_frame_gen(Core *c)	per track 1..ntotal-1: tleft--, take next point {time:s8,value:u8} when tleft<=0 (delta=step=new-cur), next segment when the item is used up; has-points bits fbit=1<<i in Seg.feat (mbit in Seg.mask for i>=32) [CONFIRMED]
+1001c9d0	func	op_track_next_seg	int op_track_next_seg(Core *c, short i, unsigned int mbit, unsigned int fbit)	skip segments with the has-points bit clear (adding dur), then segment item or phoneme default; none -> toggle bits, return 0 [CONFIRMED]
+1001cbb0	func	op_param_dispatch	void op_param_dispatch(Core *c)	outval[0]=2; for tracks with delta != 0: feac -> delta=1; switch A1/4: 1-3,13-15 rates; 4-7,10,16 smooth; 8,9 decay; 11,32 cosine; 12 linear; 18-21,28 approach; 22,23 amp approach; 24-26 set rates; 17,27,29-31 nothing [CONFIRMED]
+1001cd70	func	op_t01_amp_rates	void op_t01_amp_rates(Core *c, Track *t, short i)	type 1: set A2 of params 21..24
+1001cdb0	func	op_t02_formant_rates	void op_t02_formant_rates(Core *c, Track *t, short i)	type 2: set A2 of params 7,9,11,13
+1001cdf0	func	op_t03_f1_rate	void op_t03_f1_rate(Core *c, Track *t, short i)	type 3: set A2 of param 5
+1001ce20	func	op_t0d_amp_rates	void op_t0d_amp_rates(Core *c, Track *t, short i)	type 13: like type 1, scaled by voice/64
+1001ce80	func	op_t0e_formant_rates	void op_t0e_formant_rates(Core *c, Track *t, short i)	type 14: like type 2, scaled
+1001cee0	func	op_t0f_f1_rate	void op_t0f_f1_rate(Core *c, Track *t, short i)	type 15: like type 3, scaled
+1001cf40	func	op_t04_smooth	void op_t04_smooth(Core *c, Track *t, short i)	types 4-7,10,16: phase speed 0x10..0x7f; delta -= A2*phase/16*delta/2048 (+-0x800 rounding); out: 4,5 freq, 6 div16, 7 amp2, 10 amp, 16 offset [CONFIRMED]
+1001d059	nofunc	-	-	switch case of op_t04_smooth
+1001d069	nofunc	-	-	switch case of op_t04_smooth
+1001d079	nofunc	-	-	switch case of op_t04_smooth
+1001d089	nofunc	-	-	switch case of op_t04_smooth
+1001d0e0	func	op_t08_amp_decay	void op_t08_amp_decay(Core *c, Track *t, short i)	type 8: delta = (short)(A2*(delta+1))/128, out = target-delta (+voice, 0..31); outval[0]=3 on a fresh point [CONFIRMED]
+1001d180	func	op_t09_amp_decay	void op_t09_amp_decay(Core *c, Track *t, short i)	type 9: as type 8 with a 32-bit product, no outval[0] flag [CONFIRMED]
+1001d210	func	op_t0b_cosine	void op_t0b_cosine(Core *c, Track *t, short i)	types 11/32: cosine interpolation (table 0x100489d0), out=clamp15..255((A3+100+((v-100)*voice>>6))/2)
+1001d400	func	op_t0c_linear	void op_t0c_linear(Core *c, Track *t, short i)	type 12: linear interpolation in 1/128 steps; out = clamp30..511(voice*(v-100)/64 + A3 + 100)/2 [CONFIRMED]
+1001d4f0	func	op_out_freq	void op_out_freq(Core *c, short v, short i)	out = v/4 + voice + A3, clamp 0..127 (quarter-tone index)
+1001d550	func	op_out_div16	void op_out_div16(Core *c, short v, short i)	out = (voice + v)/16, >= 0
+1001d590	func	op_out_amp	void op_out_amp(Core *c, short v, short i)	out = voice + v/8, clamp 0..31
+1001d5e0	func	op_out_offset	void op_out_offset(Core *c, short v, short i)	writes A3 of another parameter (index from A3[i])
+1001d620	func	op_out_amp2	void op_out_amp2(Core *c, short v, short i)	out = (v + voice)/8, clamp 0..31
+1001d670	func	op_t12_approach	void op_t12_approach(Core *c, Track *t, short i)	types 18-21,28: delta -= step*rate[A2]/128 (>=1 toward 0), table 0x10048ad8; out: 18,19 freq, 20 amp, 21 offset, 28 amp2 [CONFIRMED]
+1001d725	nofunc	-	-	switch case of op_t12_approach
+1001d735	nofunc	-	-	switch case of op_t12_approach
+1001d745	nofunc	-	-	switch case of op_t12_approach
+1001d790	func	op_t16_amp_approach	void op_t16_amp_approach(Core *c, Track *t, short i)	type 22
+1001d8a0	func	op_t17_amp_approach	void op_t17_amp_approach(Core *c, Track *t, short i)	type 23
+1001d990	func	op_t18_set_rates4	void op_t18_set_rates4(Core *c, Track *t, short i)	type 24: A2 of k..k-3 = value, k = ntotal - A3[i]/2
+1001da00	func	op_t1a_set_rates	void op_t1a_set_rates(Core *c, Track *t, short i)	type 26: A2 of k,k-2,k-4,k-6 = value and their step = delta
+1001daa0	func	op_t19_set_rate	void op_t19_set_rate(Core *c, Track *t, short i)	type 25: A2[k] = value, step = delta
+1001db00	func	op_track_has_item	int op_track_has_item(Core *c, Seg *s, short i)	search s items (descending signed ids) for i, from the start; p0 = header or NULL, p1 = node data end, p2 = next ItemBlk data (0xa = none); 1 if found
+1001dbb0	func	op_track_has_default	int op_track_has_default(Core *c, Seg *s, short i)	search the phoneme record (ascending ids) for i; p1 = item or stop point, p2 = record end; 1 if found
+#
+# ---- RULSYS: opstart.c (0x1001dc40) utterance start ----
+1001dc40	func	ivx_load_param_tables	short ivx_load_param_tables(Core *c)	free out, reset output state; A1..A3[k] = ptab[ntotal-k] (A2 x16 when A1 < 0x48) [CONFIRMED, port src/opstart.c]
+1001dd40	func	op_start_utterance	short op_start_utterance(Core *c)	segs -> out, durations, tracks clear/init/prime, op_mark_param(F0 = 25); 0x20 = no segs or no F0 points; feae != 0 leaves segs and only sets synth_state [CONFIRMED]
+1001de90	func	op_emit_bookmark	void op_emit_bookmark(Core *c, Seg *s)	cb_bookmark(mark_lo>>8) when the high byte changes, then (mark_lo&0xff)<<16 | (short)mark_hi; clears the mark [CONFIRMED]
+1001df70	func	op_tracks_clear	void op_tracks_clear(Core *c)	-
+1001dfc0	func	op_tracks_init	void op_tracks_init(Core *c)	search items from ntotal-1 down, handing p0/p1/p2 to track i-1 (track ntotal-1 is searched twice); then defaults upward the same way; head mask/feat = has-points bits; track 0 = DR duration; restores A3 of FD target from ptab [CONFIRMED]
+1001e3c0	func	op_tracks_prime	void op_tracks_prime(Core *c)	tracks with npts <= 0 move to the first later segment with points, toggling the bits of the skipped ones [CONFIRMED]
+1001e510	func	op_seg_durations	short op_seg_durations(Core *c, Seg *first, Seg *end)	dur = DR value byte (item, else default; header at inline end -> value in ItemBlk), mask = feat = -1; returns 16-bit total [CONFIRMED]
+1001e5a0	func	op_mark_param	void op_mark_param(Core *c, Seg *first, Seg *end, unsigned char i)	from first->next: toggle feat bit i where neither the segment nor its phoneme record has item i [CONFIRMED]
+1001e720	func	op_track_find_item	unsigned short * op_track_find_item(Core *c, Seg *s, short i)	op_track_has_item that continues from p0 when set; a lower id stops with p0 left on it [CONFIRMED]
+1001e7e0	func	op_track_find_default	unsigned short * op_track_find_default(Core *c, Seg *s, short i)	op_track_has_default that continues from p1 when set; a higher id stops with p1 left on it, the end clears p1 [CONFIRMED]
+#
+# ---- RULSYS: tpelem.c (0x1001e890) segment lists and symbols ----
+1001e890	func	op_emit_phonemes	void op_emit_phonemes(Core *c, Seg *first, Seg *end, char *buf, int n)	names of first..end to buf (n > 2 left), or with buf NULL / n < 0 one cb_phonemes call per segment through a stack buffer [CONFIRMED, port src/tpelem.c]
+1001e930	func	seg_free_segs_held	void seg_free_segs_held(Core *c)	-
+1001e970	func	seg_free_all	void seg_free_all(Core *c)	return all working segs to the free list
+1001e990	func	seg_free_held	void seg_free_held(Core *c)	-
+1001e9b0	func	seg_free_range	void seg_free_range(Core *c, Seg *first, Seg *end)	returns nodes and their ItemBlks to free_list
+1001ea20	func	seg_alloc	Seg * seg_alloc(Core *c)	pop a 0x38 node from Core.free_list, NULL if empty
+1001ea50	func	seg_hold	void seg_hold(Core *c)	append segs to held (held_mark = first)
+1001eaa0	func	seg_unhold	void seg_unhold(Core *c)	move the last held word back to segs
+1001eb00	func	seg_copy_held	short seg_copy_held(Core *c)	append copies of held_mark..end of held (with ItemBlks; dur not copied) to segs; out of nodes -> seg_free_all, 1 [CONFIRMED]
+1001ecb0	func	tp_text_to_segs	short tp_text_to_segs(Core *c, char bound, unsigned char *from, unsigned char *to)	tp_text_to_segs1; on 0x40 with words held: retry bit 0, once more, then seg_free_segs_held [CONFIRMED]
+1001ed20	func	tp_text_to_segs1	short tp_text_to_segs1(Core *c, char bound, unsigned char *from, unsigned char *to)	bound -> " " symbol (0x10045334) before and after; 0x40 = out of nodes
+1001eda0	func	tp_symbol_to_seg	short tp_symbol_to_seg(Core *c, unsigned char *p)	append seg for the 2- or 1-char symbol at p; returns chars used (1 also for an unknown char), -1 = out of nodes [CONFIRMED]
+1001ee90	func	ph_find	PhRec * ph_find(Core *c, short name)	inventory lookup by 2-char name
+1001eed0	func	seg_free_count	int seg_free_count(Core *c)	-
+#
+# ---- RULSYS: tpstr.c (0x1001eef0) words and sentences ----
+1001eef0	func	tp_speak_char	short tp_speak_char(Core *c, unsigned char ch, char flush)	speak a char by its lexicon name: printable (upper-cased; "c%" for class 0x2100), ^X / "@C" X for controls, 2-char transliteration (else each char) for 8-bit; mode 2 + class 0x800 -> "@D" first; flush: drop output (flush_on_input) and end the sentence [CONFIRMED, port src/tpstr.c]
+1001f170	func	tp_word	short tp_word(Core *c, unsigned char *from, unsigned char *to)	word: cb_userdict (1 text / 2 phonetic replacement, 0x71 no room), transliterate+upcase (0x70 >= 128), lexicon, compound (M3/M4 both), cb_excdict (gets symbol names), M0 (out of nodes: drop held, retry bit 0); ctl_word_end [CONFIRMED]
+1001f570	func	tp_compound	short tp_compound(Core *c)	hold + copy word, M3 marks '=' prefix / '-' suffix in the names, stem via lex_lookup, segs = prefix + stem transcription + suffix, M4; 0 = not a compound, 0xf0 = done [CONFIRMED]
+1001f890	func	lex_lookup	unsigned char * lex_lookup(Core *c, unsigned char *word)	transcription or NULL: lex_index -> linear run of even-padded keys without first char; else binary search of 0x7f-separated entries (can read 1 byte past the lexicon end) [CONFIRMED]
+1001fa10	func	tp_token_m1	short tp_token_m1(Core *c, unsigned char *from, unsigned char *to)	non-word token: charset remap in place, segs, M1 (out of nodes: drop held, retry bit 0), ctl_word_end [CONFIRMED]
+1001fb20	func	tp_lex_word	short tp_lex_word(Core *c, unsigned char *word)	lexicon only; 0x73 = not found; else segs + ctl_word_end [CONFIRMED]
+1001fb90	func	tp_sentence_end	short tp_sentence_end(Core *c, unsigned char punct)	mode 8: held -> segs, punct symbol (0x17 ",,@@.", 0 " @.", mode 0x80 "@@p"), M5, M2, op_start_utterance; out of nodes -> restart the sentence with retry bit 1 (words then go out one by one) [CONFIRMED]
+1001fe90	func	run_module	short run_module(Core *c, short idx)	cw_run(c, c->mod[idx]); idx 2 first copies V_init -> V
+1001fef0	func	ctl_word_end	short ctl_word_end(Core *c)	stamp word_pos (cb_wordpos) and marks; mode 8: seg_hold; mode 4 or retry bit 1: "@." symbol, M5, M2, op_start_utterance at once [CONFIRMED, port src/contwork.c]
+#
+# ---- RULSYS: contwork.c / cw*.c rule interpreter ----
+100201b0	func	cw_run	short cw_run(Core *c, unsigned short *code)	interpreter entry; loops cw_step until status != 0
+10020240	func	cw_step	void cw_step(Core *c)	fetch opcode word, dispatch (ops < 0x100 compare tree, >= 0x100 jump table)
+10020658	label	cw_step_jumptab	-	handler table for ops >= 0x100
+100206f8	label	cw_step_indextab	-	byte index table for ops >= 0x100
+10020800	func	cw_op_BEGIN	void cw_op_BEGIN(Core *c)	op 04
+10020810	label	cw_op_END	-	op 00 (inline ret)
+10020820	func	cw_op_invalid	void cw_op_invalid(Core *c)	default handler
+10020830	func	cw_op_RULE	void cw_op_RULE(Core *c)	op 08
+10020870	func	cw_op_RULE_iter	void cw_op_RULE_iter(Core *c)	op 0C (RULE*)
+100208b0	func	cw_op_NEXT	void cw_op_NEXT(Core *c)	op 10
+100208d0	func	cw_retry	void cw_retry(Core *c)	re-run rule at next start position
+10020900	func	cw_op_SEEK	void cw_op_SEEK(Core *c)	op 40
+10020980	func	cw_fail	void cw_fail(Core *c)	jump to next rule
+100209e0	func	cw_op_FOCUS	void cw_op_FOCUS(Core *c)	op 44
+10020a50	func	cw_op_SCAN	void cw_op_SCAN(Core *c)	op 48
+10020ab0	func	cw_op_R	void cw_op_R(Core *c)	op 4C
+10020b10	func	cw_op_L	void cw_op_L(Core *c)	op 7C
+10020b60	func	cw_op_R_opt	void cw_op_R_opt(Core *c)	op 50
+10020bb0	func	cw_op_L_opt	void cw_op_L_opt(Core *c)	op 80
+10020bf0	func	cw_op_SEEKF	void cw_op_SEEKF(Core *c)	op 54
+10020c90	func	cw_op_FOCUSF	void cw_op_FOCUSF(Core *c)	op 58
+10020d20	func	cw_op_SCANF	void cw_op_SCANF(Core *c)	op 5C
+10020da0	func	cw_op_RF	void cw_op_RF(Core *c)	op 60
+10020e20	func	cw_op_LF	void cw_op_LF(Core *c)	op 90
+10020e90	func	cw_op_RF_opt	void cw_op_RF_opt(Core *c)	op 64
+10020f00	func	cw_op_LF_opt	void cw_op_LF_opt(Core *c)	op 94
+10020f70	func	cw_op_FOCUSP	void cw_op_FOCUSP(Core *c)	op 68 FOCUSP pattern: focus = next if it matches; skips the pattern by its header length
+10020ff0	func	cw_op_RP	void cw_op_RP(Core *c)	op 6C RP {opt:8,min:8} pattern: min mandatory + opt optional matches to the right
+100210e0	func	cw_op_LP	void cw_op_LP(Core *c)	op 9C LP {opt:8,min:8} pattern: the same to the left
+100211a0	func	cw_match_pattern	short cw_match_pattern(Core *c)	pattern at ip vs c->next, 0 = match. hdr bit15 ph word, bit14 {value,care} feature words, bit13 parameter-test words up to hdr len ((hdr>>1)&0x7ff words) [CONFIRMED, port src/cwtest.c]
+10021300	func	cw_ptest_a	short cw_ptest_a(Core *c, short v)	parameter-test op = low 6 bits of the test word: 0..18 capture v into R0,V0-V4,R1,V5-V9,R2,..,R3; 0x18/0x1e/0x24/0x2c/0x34/0x3c pass if next word k >,>=,==,!=,<=,< v; else status 0x50 [CONFIRMED]
+10021540	func	cw_ptest_b	unsigned short * cw_ptest_b(Core *c, unsigned short id)	find item id on c->next (inline + ItemBlks, descending ids); returns first payload word, sets Core.item to the last [CONFIRMED]
+10021660	func	cw_ptest_c	unsigned short * cw_ptest_c(Core *c, unsigned short id)	find default item id in c->next phoneme record (ascending ids); NULL if empty [CONFIRMED]
+100216e0	func	cw_op_FNEXT	void cw_op_FNEXT(Core *c)	op B0
+100216f0	func	cw_op_CPREV	void cw_op_CPREV(Core *c)	op CC
+10021720	func	cw_op_CHEAD	void cw_op_CHEAD(Core *c)	op D0
+10021730	func	cw_op_CTAIL	void cw_op_CTAIL(Core *c)	op D4
+10021740	func	cw_op_UNWRAP	void cw_op_UNWRAP(Core *c)	op B4 {n}: delete n segments from the focus (with their ItemBlks), restart the rule; n = 0 -> status 0x60 [CONFIRMED; name is historical, it is DEL]
+10021800	func	cw_op_REPL_next	void cw_op_REPL_next(Core *c)	op B8 (REPL+)
+10021820	func	cw_op_REPL	void cw_op_REPL(Core *c)	op BC {del:8,12*n:8} ph[n]: replace del segments by n new (feat/mask from phoneme record, bookmark of last deleted); followed by op 10 continues after them
+10021a00	func	cw_op_SETF_next	void cw_op_SETF_next(Core *c)	op C0 (SETF+)
+10021a20	func	cw_op_SETF	void cw_op_SETF(Core *c)	op C4: feat = feat&~M | V
+10021a80	func	cw_op_GEMIN	void cw_op_GEMIN(Core *c)	op C8: find adjacent equal phonemes with feat 0x10002, set feat/mask bit 4 on both, then NEXT
+10021b30	func	cw_op_A_set	void cw_op_A_set(Core *c)	op 150 A=n
+10021b50	func	cw_op_A_set_B	void cw_op_A_set_B(Core *c)	op 154 A=B
+10021b60	func	cw_op_A_negB	void cw_op_A_negB(Core *c)	op 158 A=B=-B
+10021b80	func	cw_op_A_add	void cw_op_A_add(Core *c)	op 15C
+10021ba0	func	cw_op_A_add_B	void cw_op_A_add_B(Core *c)	op 160
+10021bb0	func	cw_op_A_sub	void cw_op_A_sub(Core *c)	op 164
+10021bd0	func	cw_op_A_sub_B	void cw_op_A_sub_B(Core *c)	op 168
+10021be0	func	cw_op_A_abs	void cw_op_A_abs(Core *c)	op 16C
+10021c00	func	cw_op_A_mul	void cw_op_A_mul(Core *c)	op 170
+10021c30	func	cw_op_A_mul_B	void cw_op_A_mul_B(Core *c)	op 174
+10021c40	func	cw_op_A_div	void cw_op_A_div(Core *c)	op 178 n: B = n; A = (A +- n/4) / n (quarter rounding away from zero); n = 0 -> status 0x30
+10021cb0	func	cw_op_A_div_B	void cw_op_A_div_B(Core *c)	op 17C
+10021d10	func	cw_op_A_div2	void cw_op_A_div2(Core *c)	op 180 (second divide variant)
+10021d80	func	cw_op_A_div2_B	void cw_op_A_div2_B(Core *c)	op 184
+10021de0	func	cw_op_A_mulfrac	void cw_op_A_mulfrac(Core *c)	op 188 A=(A*m)>>s
+10021e30	func	cw_op_A_shr	void cw_op_A_shr(Core *c)	op 18C s: A >>= s, copying bit 14 into bit 15 each step (16-bit sign)
+10021e60	func	cw_op_A_shr2	void cw_op_A_shr2(Core *c)	op 190
+10021ea0	func	cw_op_A_shl	void cw_op_A_shl(Core *c)	op 194
+10021ec0	func	cw_op_PUSHQ1	void cw_op_PUSHQ1(Core *c)	op 198
+10021ef0	func	cw_op_PUSHQ2	void cw_op_PUSHQ2(Core *c)	op 19C
+10021f20	func	cw_op_POPQ1	void cw_op_POPQ1(Core *c)	op 1A0 B=POPQ1
+10021f50	func	cw_op_POPQ2	void cw_op_POPQ2(Core *c)	op 1A4 B=POPQ2
+10021f80	func	cw_op_B_R0	void cw_op_B_R0(Core *c)	op 1A8
+10021f90	func	cw_op_B_R1	void cw_op_B_R1(Core *c)	op 1AC
+10021fa0	func	cw_op_B_R2	void cw_op_B_R2(Core *c)	op 1B0
+10021fb0	func	cw_op_B_R3	void cw_op_B_R3(Core *c)	op 1B4
+10021fc0	func	cw_op_R0_A	void cw_op_R0_A(Core *c)	op 1B8
+10021fd0	func	cw_op_R1_A	void cw_op_R1_A(Core *c)	op 1BC
+10021fe0	func	cw_op_R2_A	void cw_op_R2_A(Core *c)	op 1C0
+10021ff0	func	cw_op_R3_A	void cw_op_R3_A(Core *c)	op 1C4
+10022000	func	cw_op_B_V	void cw_op_B_V(Core *c)	op 1C8
+10022020	func	cw_op_V_A	void cw_op_V_A(Core *c)	op 1CC
+10022040	func	cw_op_LD	void cw_op_LD(Core *c)	op 100 {id} [{k:7,flags}]: B = item id of the focus (else phoneme default); k selects the payload word, flag 0x80 = signed high byte [CONFIRMED]
+10022180	func	cw_op_ST_s	void cw_op_ST_s(Core *c)	op 104: store A clamped -129..127
+100221b0	func	cw_op_ST_u	void cw_op_ST_u(Core *c)	op 108: store A clamped 0..255
+100221e0	func	cw_op_ST	void cw_op_ST(Core *c)	op 10C {tspec:8,id:8} [{k:7,flags}]: store A in item id of the focus: existing item -> cw_st_param, phoneme default -> cw_st_var, else cw_st_default
+10022250	func	cw_st_param	void cw_st_param(Core *c, unsigned short id, unsigned short *val)	item exists: id & 0x8000 -> cw_st_param_rel (variable) else cw_st_param_abs (parameter)
+10022290	func	cw_st_param_rel	void cw_st_param_rel(Core *c, short tspec, unsigned short *val)	variable item (id >= 0x80): tspec >= 0 overwrite, < 0 delete the value (shift storage down), empty item + tspec > 0 insert [CONFIRMED]
+100223f0	func	cw_st_param_abs	void cw_st_param_abs(Core *c, short tspec, unsigned short *val)	parameter item: word k (bit 6 = from end); tspec 0 set low/high byte, > 0 insert word, < 0 delete word [CONFIRMED]
+10022640	func	cw_st_var	void cw_st_var(Core *c, unsigned short id, unsigned short *val)	copy the phoneme default item into the segment, applying the store (sub1 variable, sub2 parameter)
+100226e0	func	cw_st_var_sub1	void cw_st_var_sub1(Core *c, short tspec)	variable: write A unless tspec < 0
+10022730	func	cw_st_var_sub2	void cw_st_var_sub2(Core *c, short tspec, unsigned short *src, short n)	parameter: copy n default bytes, set/insert/delete word k
+10022860	func	cw_st_default	void cw_st_default(Core *c, unsigned short id)	no item and no default: create {id|2, A} unless tspec <= 0 on a parameter
+10022940	func	cw_item_insert	int cw_item_insert(Core *c, short nbytes)	open nbytes at Core.item_ins: shift items up, append an ItemBlk when the last node is full; 0 = out of nodes [CONFIRMED]
+10022b20	func	cw_find_item	unsigned short * cw_find_item(Core *c, Seg *s, unsigned short id)	search segment items (inline + ext); sets Core.item/item_ins
+10022c20	func	cw_find_default_item	unsigned short * cw_find_default_item(Core *c, Seg *s, unsigned short id)	search phoneme inventory record of s
+10022ca0	func	cw_op_skip1	void cw_op_skip1(Core *c)	ops 1F0/1F4/1F8: skip one operand word (no-op)
+#
+# ---- synthesizer (no SCCS id); C port in src/synth.c, bit-exact vs the DLL (tests/synth_cmp.c) ----
+10022cb0	func	synt_nop	int synt_nop(void)	returns 0; called by synt_create
+10022cb7	func	synt_stub_cb7	int synt_stub_cb7(void)	returns 0; unreferenced
+10022cbe	func	synt_stub_cbe	int synt_stub_cbe(void)	returns 0; unreferenced
+10022cc5	func	synt_ctrl	int synt_ctrl(Synth *s, short cmd, void *arg)	cmds 0..0x13; 0..8 = create (s is Synth **); see REFERENCE.md 3.6
+10022e8f	func	synt_create	int synt_create(Synth **out, short type)	fs=11025, 100 frames/s
+10022f62	func	synt_set_param_list	int synt_set_param_list(Synth *s, short *arg)	cmd 0x0b: bind map to a code list; arg[0]<0 -> -arg[0] codes, else 25
+10022fb4	func	synt_generate	short synt_generate(Synth *s, void *buf, short n)	fill n samples, pulling frames via get_frame; returns synthesized count (engine 0x10011fbb)
+10023180	func	synt_destroy	int synt_destroy(Synth *s)	-
+100231a0	func	synt_alloc_state	int synt_alloc_state(Synth *s)	SynthTables(0x2c) + SynthRun(0x24) + coef/state per mode
+1002335b	func	synt_select_map	int synt_select_map(Synth *s)	memcpy map 0x10048ed0 or 0x10048fd0 into tab->map
+100233ab	func	synt_init_lowpass	int synt_init_lowpass(Synth *s)	sets frame_fn/samples_fn; output one-pole 200 Hz (mode 0) / 1000 Hz (mode 1)
+100234a4	func	synt_build_tables	int synt_build_tables(SynthTables *t, int fs)	rebuild amp/res/bw tables
+10023577	func	synt_bind_params	void synt_bind_params(Synth *s, short n)	map[i].frame_index = position of map[i].name in s->plist
+100235fa	func	synt_find_param	short synt_find_param(void *args)	args -> {short *list; short n; SynthMapEntry *e} on caller stack; index >= 2 or -1
+10023691	func	synt_free_state	int synt_free_state(Synth *s)	-
+10023760	func	synt_samples_mode1	int synt_samples_mode1(Synth *s, short *buf, short n)	empty stub: mode 1 produces no samples
+100237a0	func	synt_set_resonator	void synt_set_resonator(SynthTables *t, Resonator *r, short f, short b, char shift)	b=2*Tb[f]*Tbr[b]>>(15-shift); c likewise; a=(0x7fffffff>>(15-shift))-2b-c; f, b unchecked: voices 2/4 give K1/K2 = -6, a read before res_b/res_c (port guards it) [CONFIRMED]
+10023846	func	synt_frame_mode0	int synt_frame_mode0(Synth *s, short *frame)	per-frame coefficient update (FrameCoef0)
+10023fbb	func	synt_frame_mode1	int synt_frame_mode1(Synth *s, short *frame)	per-frame coefficient update (FrameCoef1: F1-F3, FH-4, FN, K1)
+100245e0	func	synt_samples_mode0	int synt_samples_mode0(Synth *s, short *buf, short n)	inline-asm sample loop (imul; rcl edx,1 products)
+10024940	func	synt_samples_mode0_16k	int synt_samples_mode0_16k(Synth *s, short *buf, short n)	fs=16000 variant: fric input <<1 (not <<2), output gain x3 (not x4)
+10024ca0	func	synt_mk_amp_table	short * synt_mk_amp_table(void)	32 x int16 dB table
+10024d34	func	synt_mk_res_b_table	short * synt_mk_res_b_table(int fs)	128 x 32767*exp(-pi B/fs)*cos(2 pi F/fs)
+10024e2f	func	synt_mk_res_c_table	short * synt_mk_res_c_table(int fs)	128 x -32767*exp(-2 pi B/fs)
+10024efc	func	synt_mk_bw_b_ratio	short * synt_mk_bw_b_ratio(int fs)	32 x extra-bandwidth ratio (B term)
+10024fe5	func	synt_mk_bw_c_ratio	short * synt_mk_bw_c_ratio(int fs)	32 x extra-bandwidth ratio (C term)
+10011410	func	eng_synth_get_frame	short * eng_synth_get_frame(void *eng)	synt_ctrl 0x09 callback: op_next_frame(eng+0x110) if the engine is active, else NULL
+#
+# ---- data ----
+10048508	data	tp_charset1	uchar[128]	8-bit char -> national char, Core.charset bit 0 (src/tp_data.c TP_CHARSET1)
+10048588	data	tp_charset2	uchar[128]	8-bit char -> national char, Core.charset bit 1; the engine sets 2 (TP_CHARSET2)
+100485e8	label	tp_xlat_base	-	built-in transliterations for xlat codes >= 0xe0 (tp_xlat_char, TP_XLAT)
+10048608	data	tp_xlat_default	uchar[96]	built-in 2-char transliterations of 0x80..0xaf
+10048668	data	tp_xlat_spit	uchar[96]	same for SP/IT (.ivx tag)
+10048998	data	tp_hy	char[4]	"hy\0\0": token spoken between the parts of word-word; tp_symbol_to_seg reads the byte after the y [CONFIRMED]
+10048dc8	data	tp_end_default	char[4]	" @.": sentence end symbols without punctuation
+10048dcc	data	tp_word_end	char[4]	"@.": word-end symbols (ctl_word_end, mode 4)
+10048dd0	data	tp_end_mode80	char[8]	"@@.": sentence end in mode 0x80, [2] = punctuation
+10048dd8	data	tp_end_text	char[8]	",,@@.": end of text (0x17)
+10048de0	data	tp_ctl_prefix	char[4]	"@C": name spoken before X for a control char ^X without a name
+10048de4	data	tp_class800_prefix	char[4]	"@D": spoken before a class-0x800 char in mode 2
+10041000	data	k_bw_div20	double	20.0 in B(F)=sqrt((F/20)^2+50^2)
+10041010	data	k_bw_2500	double	2500.0 = 50^2
+10040fd0	data	k_lp200	double	-2pi*200: synt_init_lowpass mode 0
+10040fd8	data	k_one	double	1.0
+10040fe0	data	k_int_max	double	2147483647.0
+10040fe8	data	k_lp1000	double	-2pi*1000: synt_init_lowpass mode 1
+10041008	data	k_32767	double	32767.0
+10041018	data	k_neg_pi	double	-3.1415926536
+10041020	data	k_two_pi	double	6.2831853072
+10041028	data	k_neg_two_pi	double	-6.2831853072
+10049518	label	synth_param_names	-	32 x 4-byte codes F1..F0 RG RK FA AZ NA NM DI FZ BZ FP BP (synth_map_mode0 names)
+10049598	label	synth_param_names_alt	-	second copy, used by synth_map_alt
+100448e4	label	sapi_iid_names	-	IID name strings
+10045374	data	synth_param_codes	-	MSVC multichar param codes (AN/AH swapped)
+100453d8	data	wpm_rate_table	short[100]	frames/s per speed index (index 50 = 100)
+10048460	data	tts_cmd_table	pointer[34]	tts_ctrl dispatch table (0x0b and 0x0c share tts_c0b_nop)
+100486e8	data	tp_class80	uchar[128]	class codes of 0x80..0xff for .ivx files without H[14] (ivx_build_class_flags; src/tp_data.c TP_CLASS80)
+10048768	data	tts_param_names	pointer[29]	DR ST FS CS FD F1 B1 ... F0 XX YY ZZ; ivx_bind copies [5..28] to Core.pnames (src/tp_data.c)
+100487e0	data	tts_voice_defaults	short[148]	voices 0..4, 29 words each (DR ST FS CS FD F1..F0 XX YY ZZ offsets/scales), + 3 words read when ntotal is 32 (before a bind); tts_create copies voice 0 to user voices 5..9
+10048904	label	param_names	-	4-byte name strings
+10048b60	data	value_byte_table	short[260]	value remap when A1==0x80 (types 11/32); index clamped to 0x103
+10048ec8	data	synth_default_f06	short	Synth.f06 init
+10045334	data	tp_bound_sym	char[2]	" ": word-boundary symbol appended by tp_text_to_segs1
+100489d0	data	op_cosine_table	short[129]	16384*(1-cos(pi*i/128)): cosine interpolation ramp 0..32767
+10048ad8	data	op_rate_table	short[68]	256/(2i), [0] = 256: approach rate by A2 (65 entries + 3 zeros; indexed unchecked, port keeps 0x100489d0..0x10048ecf as one array, src/op_data.c)
+10048ed0	data	synth_map_mode0	SynthMapEntry[32]	synth parameter map (map_sel 0)
+10048fd0	data	synth_map_alt	SynthMapEntry[32]	synth parameter map (map_sel != 0)
+100490d0	data	freq_index_hz	double[128]	F_k = 200*2^((k-3)/24)
+100494d0	data	bw_delta_hz	short[32]	additive bandwidth increments
