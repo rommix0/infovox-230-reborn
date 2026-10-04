@@ -1,8 +1,8 @@
 import struct
 import unittest
 
-from ivxedit.rules import (Instr, decode_module, encode_module, ph_positions, rep_carries,
-                           rep_split)
+from ivxedit.rules import (Instr, Rule, decode_module, encode_instr, encode_module,
+                           encode_rule, ph_positions, rep_carries, rep_split)
 from tests.util import LANGS, ivx_bytes, ivx_path, tools_import
 
 SECTIONS = {'M0': 9, 'M1': 10, 'M2': 12, 'M3': 5, 'M4': 6, 'M5': 11}
@@ -66,6 +66,22 @@ class RulesTest(unittest.TestCase):
                             found.setdefault(lang, []).append(ins.args[0])
         self.assertEqual({k: sorted(v) for k, v in found.items()},
                          {'da': [0x314, 0x320, 0x32C, 0x32C], 'ic': [0x1108]})
+
+    def test_encode_calls_ph_id_for_references(self):
+        # Test (a): single reference in SEEK instruction
+        ref = object()
+        self.assertEqual(encode_instr(Instr(0x40, [ref]), lambda r: 0x12D2), [0x40, 0x12D2])
+
+        # Test (b): REPL with two references
+        r1, r2 = object(), object()
+        ph_id_map = {r1: 7, r2: 9}
+        self.assertEqual(encode_instr(Instr(0xBC, [0x0118, r1, r2]), ph_id_map.__getitem__),
+                         [0xBC, 0x0118, 7, 9])
+
+        # Test (c): full rule with references
+        ref = object()
+        rule = Rule(False, [Instr(0x40, [ref]), Instr(0x10, [32])])
+        self.assertEqual(encode_rule(rule, lambda r: 0x12D2), [0x08, 10, 0x40, 0x12D2, 0x10, 32])
 
 
 if __name__ == '__main__':
