@@ -721,7 +721,7 @@ All multi-byte values are **big-endian**, which suggests the files were compiled
    0x80 version string   0xC0 "Copyright (C) Solna 1988,1989 INFOVOX AB"
 0x200  body (all offsets below are body-relative)
    0x00  H[0..15] BE dwords (section directory)
-   0x40  build tag "SWRU981118.P2"
+   0x40  build tag, 10 chars "<LL>RU<yymmdd>" ("SWRU981118"); then binary up to 0x6A [CONFIRMED, all 12 files; meaning NOT FOUND]
    0x6A  word = 2*25 (nParams incl. DR..A0 → core+0x810)   0x6C word 116   0x6E word = 2*29 (total params → core+0x812)
    0x70  4 arrays x 32 words, per-parameter tables (§5.3)  → core+0x708/0x700/0x704/0x70C
    H[8]=0x170  phoneme/symbol inventory: chain of length-prefixed records, 0-terminated (§5.4) → core+0xA0

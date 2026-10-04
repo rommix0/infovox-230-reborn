@@ -186,6 +186,8 @@ Editing is enabled per editor in step 4 (all but Rules) and step 5 (Rules). Ever
 - Plays the WAV (Qt Multimedia) and draws, on one zoomable time axis: the waveform, a spectrogram (numpy STFT painted into a `QImage`, no matplotlib) and the phoneme strip from the `-E` events.
 - **A/B**: the same text through the file as it was opened, stacked above the edited result.
 
+**As built in step 2** (plan `docs/superpowers/plans/2026-10-04-ivxedit-step2-readonly-gui.md`): the rules are listed by `listing.py` (format in its docstring; the parser comes with step 3), the readable names are in `info.py`, the "Used by" index in `xref.py`, the spectrogram in `dsp.py` (0–8 kHz, 6 ms window). Only a File menu so far; the Problems panel is a `Problems (n)` status-bar label until step 4; phoneme cells are `value@time` as in REFERENCE §5.4; the Characters view shows "(built-in)" for 0x80–0xFF in files without H[14]. `ivxsay -E` prints times in milliseconds, so the phoneme strip is exact to 1 ms.
+
 ## Testing
 
 `unittest`, run by `python -m unittest discover -s editor/tests -t editor`; a new `make editor-test` target, also run by `make test`. Tests that need `build/ivxsay.exe` or PySide6 skip with a message when they are missing.

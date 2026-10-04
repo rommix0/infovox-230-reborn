@@ -1,4 +1,4 @@
-"""The main window: section tree and the view for the selected item."""
+"""The main window: section tree, the view for the selected item, the Speak panel."""
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -13,6 +13,7 @@ from ..model import PNAMES, load
 from ..xref import phoneme_uses
 from .phonemeview import PhonemeView
 from .rulesview import RulesView
+from .speakpanel import SpeakPanel
 from .views import HeaderView, LexiconView, TableView, TextView
 
 ROLE = Qt.ItemDataRole.UserRole
@@ -38,9 +39,14 @@ class MainWindow(QMainWindow):
         self.text_view = TextView()
         for w in (self.header_view, self.table_view, self.phoneme_view, self.lexicon_view, self.text_view):
             self.stack.addWidget(w)
+        self.speak = SpeakPanel(settings)
+        right = QSplitter(Qt.Orientation.Vertical)
+        right.addWidget(self.stack)
+        right.addWidget(self.speak)
+        right.setSizes([500, 300])
         main = QSplitter(Qt.Orientation.Horizontal)
         main.addWidget(self.tree)
-        main.addWidget(self.stack)
+        main.addWidget(right)
         main.setSizes([220, 900])
         self.setCentralWidget(main)
         self.problems = QLabel()
@@ -88,6 +94,7 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(v)
             v.deleteLater()
         self.rule_views = {}
+        self.speak.set_model(f, data)
         problems = check(f)
         self.problems.setText('Problems (%d)' % len(problems))
         self.problems.setToolTip('\n'.join(str(p) for p in problems))
@@ -219,3 +226,7 @@ class MainWindow(QMainWindow):
     def show_rule(self, module, i):
         self.tree.setCurrentItem(self.module_items[module])
         self._rules_view(module).goto_rule(i)
+
+    def closeEvent(self, event):
+        self.speak.cleanup()
+        super().closeEvent(event)
