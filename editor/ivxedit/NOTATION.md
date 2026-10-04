@@ -10,8 +10,9 @@ terminator (REFERENCE §5.6) and the 5 `REPL` words whose count carries.
 Two rules hold throughout:
 - **Every encoding has its own spelling.** Two instruction sequences that look alike but
   behave differently (REFERENCE §5.6: the `inserted` flag, where `NEXT` resumes) are
-  written differently. No two texts give the same rule unless they differ only in spacing
-  or in the optional spellings listed under "Equivalent spellings".
+  written differently. The reader also accepts some variant spellings of one encoding
+  (spacing, and the ones under "Equivalent spellings"); the editor always writes the
+  canonical one.
 - **Unmarked means the default encoding.** A rule written without markers (`^`, `…`, `⁺`,
   `{1}`) gets the encoding listed under "Elements and their opcodes".
 
@@ -113,7 +114,10 @@ of the spec word.
 These give the same words, and the editor writes the first:
 - `A[+b20]` and `A[+b20]{1}` (an element that is a pattern anyway);
 - `{ vac := 5 }` and `{ A= 5; vac := A }`;
-- `{ x; y }` and `{ x } { y }`.
+- `{ x; y }` and `{ x } { y }`;
+- the same number or bit set written another way: `B{1,0}` and `B{1}`, `B{0,127}` and `B*`,
+  `#01` and `#1`, `[−b24 +b20]` and `[+b20 −b24]` (bits in any order), `<F1 = -0>` and
+  `<F1 = 0>`, `<F1 = 65535>` and `<F1 = -1>`.
 
 ## Examples
 

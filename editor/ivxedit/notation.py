@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from .info import item_name, ph_name
 from .listing import (CAPTURE, CAPTURE_IDS, ITEM_IDS, ParseError, _ldst, _Out, _read_instr,
-                      _shaped, check_length, ldst_words, rule_line, u16, words)
+                      _shaped, check_length, dec, ldst_words, rule_line, u16, words)
 from .model import PhRef
 from .rules import NEXT, REPL, REPL_NEXT, Instr, Rule, rep_split
 
@@ -496,10 +496,11 @@ def read_bundle(t):
     v = mk = 0
     for part in body.split(' ') if body else []:
         m = re.fullmatch(r'([+−])b([0-9]+)', part)
-        if not m or int(m.group(2)) > 31 or mk >> int(m.group(2)) & 1:
+        bit = dec(m.group(2), t.pos) if m else 99
+        if bit > 31 or mk >> bit & 1:
             raise ParseError('expected +bN or −bN, N in 0..31, each bit once', t.pos)
-        mk |= 1 << int(m.group(2))
-        v |= (m.group(1) == '+') << int(m.group(2))
+        mk |= 1 << bit
+        v |= (m.group(1) == '+') << bit
     return v, mk
 
 
@@ -519,9 +520,10 @@ def read_rep(t):
     if t.text == '*':
         return 0, 127
     lo, _, hi = t.text[1:-1].partition(',')
-    if int(lo) > 255 or int(hi or 0) > 255:
+    lo, hi = dec(lo, t.pos), dec(hi or '0', t.pos)
+    if lo > 255 or hi > 255:
         raise ParseError('a count is more than 255', t.pos)
-    return int(lo), int(hi or 0)
+    return lo, hi
 
 
 def read_block(t, names):
@@ -587,7 +589,7 @@ def read(text, names):
         r.k += 1
         form.iterative = t.text.startswith('*')
         if '#' in t.text:
-            form.label = int(t.text.lstrip('*#'))
+            form.label = dec(t.text.lstrip('*#'), t.pos)
             if form.label > 0xFFFF:
                 raise ParseError('a label is at most 65535', t.pos)
     form.groups.append(_group(r, True))

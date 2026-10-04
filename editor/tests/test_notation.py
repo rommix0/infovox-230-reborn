@@ -125,7 +125,9 @@ class ExamplesTest(unittest.TestCase):
                      '#1 A → S / … B _', '#1 B[+b1] → S', '#1 A → S ; B → S', '#1 A →⁺ S',
                      '#1 A → S / B ⟵ C _', '#1 A → { A = 5 }', '#1 A → { LD F1@0 }', '#1 A → { F1 := 5 }',
                      '#1 A → S / _ B{300}', '#99999 A → S', '#1 A → ∅ ↺ [+b1]', '#1 ∅ → ∅ ↺ / _ A',
-                     '#1 A → ' + 'S ' * 22):
+                     '#1 A → ' + 'S ' * 22,
+                     '#' + '9' * 5000 + ' A → S', '#1 A → S / _ B{' + '9' * 5000 + '}',
+                     '#1 A → [+b' + '9' * 5000 + ']'):
             with self.subTest(text=text):
                 with self.assertRaises(ParseError):
                     parse_notation(text, NAMES)
