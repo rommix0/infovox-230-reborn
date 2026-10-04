@@ -1,7 +1,7 @@
 import unittest
 
 from ivxedit.checks import check
-from ivxedit.model import PNAMES, ParamItem, PhRef, load
+from ivxedit.model import PNAMES, ParamItem, PhRef, Phoneme, load
 from ivxedit.rules import REPL, Instr, ph_positions
 from tests.util import LANGS, ivx_bytes
 
@@ -67,6 +67,37 @@ class ChecksTest(unittest.TestCase):
         f = sw()
         f.phonemes.append(f.phonemes.pop(0))
         self.assertIn('inventory', [p.where for p in check(f)])
+
+    def test_inventory_size_limit(self):
+        f = sw()
+        size = lambda: 2 + sum(len(p.to_bytes()) for p in f.phonemes)
+        while size() + 12 <= 0x8000:
+            f.phonemes.append(Phoneme(b'', 0, 0, []))
+        self.assertEqual(check(f), [])
+        f.phonemes.append(Phoneme(b'', 0, 0, []))
+        self.assertIn('inventory', [p.where for p in check(f)])
+
+    def test_required_modules(self):
+        f = sw()
+        del f.modules['M5']
+        probs = check(f)
+        self.assertTrue(any(p.where == 'modules' and p.message.startswith('M5') for p in probs))
+        f = sw()
+        del f.modules['M4']
+        self.assertTrue(any(p.where == 'modules' and 'M3 needs M4' in p.message for p in check(f)))
+
+    def test_repl_count_byte(self):
+        f = sw()
+        ins = next(x for m in f.modules.values() for r in m.rules for x in r.instrs
+                   if x.op == REPL and x.args[0] == 0x10C and len(x.args) == 2)
+        ins.args[0] = 0x10D
+        self.assertTrue(any('is not for' in p.message for p in check(f)))
+
+    def test_malformed_repl_does_not_raise(self):
+        f = sw()
+        ins = next(x for m in f.modules.values() for r in m.rules for x in r.instrs if x.op == REPL)
+        ins.args = []
+        self.assertTrue(check(f))
 
 
 if __name__ == '__main__':

@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 from .model import PhRef, VarItem
-from .rules import REPL, REPL_NEXT, ph_positions, rep_carries, rep_split
+from .rules import REPL, REPL_NEXT, ph_positions, rep_split
 
 
 @dataclass
@@ -55,14 +55,42 @@ def _check_phoneme(ph, out):
     return size
 
 
+def _check_instr(ins, w, present, out):
+    for k in ph_positions(ins):
+        a = ins.args[k]
+        if isinstance(a, PhRef) and a.ph is not None and id(a.ph) not in present:
+            out.append(Problem(w, 'uses %s, which is not in the inventory' % ph_label(a.ph)))
+    if ins.op in (REPL, REPL_NEXT):
+        if not ins.args or not isinstance(ins.args[0], int):
+            out.append(Problem(w, 'REPL needs its count word first'))
+        elif ins.legacy:
+            if rep_split(ins.args[0])[1] != len(ins.args) - 1:
+                out.append(Problem(w, 'REPL word 0x%x is not for %d phonemes'
+                                   % (ins.args[0], len(ins.args) - 1)))
+        elif 12 * (len(ins.args) - 1) > 0xFF:
+            out.append(Problem(w, 'REPL of %d phonemes: at most 21 fit its count byte'
+                               % (len(ins.args) - 1)))
+        elif ins.args[0] & 0xFF != 12 * (len(ins.args) - 1):
+            out.append(Problem(w, 'REPL word 0x%x is not for %d phonemes'
+                               % (ins.args[0], len(ins.args) - 1)))
+    if any(isinstance(a, int) and not 0 <= a <= 0xFFFF for a in ins.args):
+        out.append(Problem(w, 'an operand does not fit 16 bits'))
+
+
 def check(f):
     """-> list of Problem; empty when to_bytes(f) gives a file the engine can load"""
     out = []
     if not f.phonemes or not f.phonemes[0].is_defaults or any(p.is_defaults for p in f.phonemes[1:]):
         out.append(Problem('inventory', 'the defaults record must be first, and only there'))
     size = 2 + sum(_check_phoneme(ph, out) for ph in f.phonemes)
-    if size > 0x10000:
-        out.append(Problem('inventory', 'is %d bytes; phoneme ids are 16-bit' % size))
+    if size > 0x8000:
+        out.append(Problem('inventory', 'is %d bytes; phoneme ids are signed 16-bit offsets, '
+                           'so at most 32768' % size))
+    for name in ('M0', 'M1', 'M2', 'M5'):
+        if name not in f.modules:
+            out.append(Problem('modules', '%s is required: the engine binds or byte-swaps through it' % name))
+    if 'M3' in f.modules and 'M4' not in f.modules:
+        out.append(Problem('modules', 'M3 needs M4: the byte-swap runs M3 up to M4'))
 
     present = {id(ph) for ph in f.phonemes}
     for name, m in f.modules.items():
@@ -70,19 +98,10 @@ def check(f):
             w, nwords = rule_label(name, i, r), 0
             for ins in r.instrs:
                 nwords += 1 + len(ins.args)
-                for k in ph_positions(ins):
-                    a = ins.args[k]
-                    if isinstance(a, PhRef) and a.ph is not None and id(a.ph) not in present:
-                        out.append(Problem(w, 'uses %s, which is not in the inventory' % ph_label(a.ph)))
-                if ins.op in (REPL, REPL_NEXT):
-                    n = rep_split(ins.args[0])[1]
-                    if n != len(ins.args) - 1:
-                        out.append(Problem(w, 'REPL word 0x%x is not for %d phonemes'
-                                           % (ins.args[0], len(ins.args) - 1)))
-                    elif rep_carries(ins.args[0]) and not ins.legacy:
-                        out.append(Problem(w, 'REPL of %d phonemes: at most 21 fit its count byte' % n))
-                if any(isinstance(a, int) and not 0 <= a <= 0xFFFF for a in ins.args):
-                    out.append(Problem(w, 'an operand does not fit 16 bits'))
+                try:
+                    _check_instr(ins, w, present, out)
+                except (IndexError, TypeError):
+                    out.append(Problem(w, 'malformed instruction 0x%x' % ins.op))
             if 2 + 2 * nwords > 0xFFFF:
                 out.append(Problem(w, 'the rule is longer than its length word holds'))
 
