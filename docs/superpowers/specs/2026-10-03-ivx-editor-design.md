@@ -16,12 +16,12 @@ Measured on the 12 shipped files with `tools/ivx.py`, `tools/ivxdasm.py` and cap
 - **A second, indexed lexicon follows the class codes in the 10 files without H[3]** [CONFIRMED that the data exists; format HYPOTHESIS]. At H[13] + 0x80 there is a 128-word index (one entry per first byte; the DLL byte-swaps it, REFERENCE §5.1), then entries such as `!` → `'UM#GE0K'E:R` (German) and `ABR'IR INTERROGATHI'ON` (Spanish). Every index value is below the region's size (German: max 0xc566, region 0xc590), so the values are relative to the region [LIKELY] and the region can move as one block. REFERENCE §5.7's "the other languages rely on rules" is incomplete.
 - **Danish H[2] = 0xDB00 points into that region** [CONFIRMED]; its meaning is unknown.
 - **Phoneme ids are byte offsets from H[8]**: `REPL` reads the new segment's record at `phinv + id/2` words (`src/cwelem.c:167`) [CONFIRMED]. Engine code looks phonemes up by name (`ph_find`, `src/tpelem.c:284`), so the rule bytecode is the only user of the offsets [LIKELY; step 1 searches the Core for other phoneme pointers].
-- **8 phoneme ids in the rules do not point at a record start**: 1 in `frrules.ivx` (0x1bae) and 7 in `itrules.ivx` (0xe3c) [CONFIRMED]. Probably mistakes in the shipped rules [HYPOTHESIS].
+- **8 phoneme ids in the rules point at the inventory's 0 terminator**: 1 in `frrules.ivx` (0x1bae) and 7 in `itrules.ivx` (0xe3c) [CONFIRMED]. They name a phoneme that does not exist; probably a compiler artifact [HYPOTHESIS].
 - **The `NEXT` operand is never read**: `cw_op_NEXT` resets `ip` to the rule start (`src/cwflow.c:45`) [CONFIRMED]. It is almost certainly the rule's number or line in the original source [LIKELY], and the editor shows it as the rule's label.
 - **Rule shapes** [CONFIRMED, all 15,564 rules]: 15,114 (97 %) are a match part with exactly one focus, then actions, then `NEXT`. Of those, 11,540 only rewrite (`REPL`, `SETF`, `UNWRAP`, `GEMIN`), 3,148 only compute (`LD`/`ST`/arithmetic, mostly M2) and 426 do both. The other 450 move the match cursor mid-match (`CPREV`/`CHEAD`/`CTAIL`), mostly `CPREV ; L…` (left context relative to the focus).
 - **Matching is one left-to-right scan** [CONFIRMED, `src/cwtest.c`]: `SCAN x` searches right for `x` without taking a focus (left context), `SEEK x` searches right for the focus, `FOCUS x` requires the next segment to be the focus, `R`/`R?` require/allow the next segment, `L`/`L?` step left (after `CPREV` sets `next = focus->prev`), `RP`/`LP` repeat a pattern `min` times then up to `opt` more. `REPL d → ids` deletes `d` segments from the focus and inserts `ids`; `REPL+` (B8), `SETF+` (C0) act one segment after the focus.
 - **Encodings that look equivalent are not**: the `inserted` flag (`FOCUS` fails while it is set, `SEEK` clears it) and where `NEXT` resumes after a `REPL` differ between, for example, `SEEK x ; R y ; REPL+ …` and `SCAN x ; FOCUS y ; REPL …` [CONFIRMED, `src/cwtest.c`, `src/cwelem.c:125`].
-- **One shipped `REPL` word does not encode as `d·256 + 12·n`**: Danish M5, `0x314` (REFERENCE §5.6, the port's guard in `cw_op_REPL`) [CONFIRMED].
+- **Five shipped `REPL` words do not encode as `d·256 + 12·n` without a carry**: Danish 0x314, 0x320, 0x32c ×2 and Icelandic 0x1108 [CONFIRMED].
 - **`ivxsay -l` accepts an `.ivx` path** and `-E` prints phoneme events with sample positions (`cli/ivxsay.c`) [CONFIRMED]. The library API does not expose synth frames.
 - **Environment**: Python 3.13 is 64-bit, so it cannot load the 32-bit `infovox230.dll`; Speak runs `ivxsay.exe` as a separate process. numpy 2.4 is installed; PySide6 and pytest are not.
 
@@ -59,7 +59,8 @@ editor/
 
 - **`IvxFile`**
   - `header`: flags, version string (0x80), copyright string (0xC0), lexicon name (0x10), the dword at 0x1C, and the rest of the 0x200 bytes as raw bytes.
-  - `build_tag` (body 0x40) and the word at 0x6C, copied as found. The words at 0x6A and 0x6E are derived from the parameter count on save and checked against the originals in the round-trip test.
+  - `head`: body 0x40..0x70 (build tag, then the words at 0x6A, 0x6C, 0x6E), copied as found.
+  - `end_pad`: zero bytes after H[15] (am, it, no, sp); `pads`: extra zero padding after a section (16 after the inventory in 6 files).
   - `params`: 29 entries in parameter order (`DR ST FS CS FD F1 … F0 XX YY ZZ`), each with `a0` (raw word: the names slot), `a1` (type code), `a2` (rate), `a3` (offset). The writer stores them reversed, slot j ↔ parameter 29−j, in the 32-word arrays; the three unused slots per array are kept raw.
   - `phonemes`: list of `Phoneme`. The first is the defaults record (`is_defaults = True`) and stays first.
   - `modules`: dict `M0`…`M5` → `Module`, or absent when the language has none.
@@ -71,7 +72,7 @@ editor/
 - **`Module`**: `lead` word, `rules: list[Rule]`, and the module's trailing words after its last rule (`END`, …) as decoded instructions.
 - **`Rule`**: `label` (the `NEXT` operand, or `None` when the rule has no `NEXT`), `iterative` (`RULE*`), `instrs: list[Instr]`.
 - **`Instr`**: opcode plus typed operands: `PhRef`, feature pair `(V, M)`, pattern, LD/ST spec and index words, `REPL` (`del`, `ids`, and the raw word when it does not encode as `d·256 + 12·n`), numbers.
-- **`PhRef`**: a reference to a `Phoneme` object plus a byte `delta` (0 except for the 8 stray ids, which reference the record that contains them). The GUI flags `delta ≠ 0`.
+- **`PhRef`**: a reference to a `Phoneme` object plus a byte `delta`; `PhRef(None)` is the inventory terminator (the 8 ids above), encoded as the new terminator offset.
 
 ## Writer (`writer.py`)
 
@@ -205,10 +206,7 @@ GUI (steps 2–4, `QT_QPA_PLATFORM=offscreen`):
 
 ## Open questions (investigated in step 1)
 
-- The exact section alignment rule (16 bytes expected from the gaps).
-- The format of lexicon2 and whether its index values are relative to the region (they look it); whether Danish H[2] points into it.
-- Whether any engine code other than the rule bytecode holds phoneme offsets (Core fields set from the inventory; `ph_find` users).
-- Whether the words at 0x6A/0x6E always equal 2 × the parameter counts in all 12 files.
+Answered while planning step 1 (plan `docs/superpowers/plans/2026-10-03-ivxedit-step1-model-writer.md`, "Facts found while planning"): sections are 16-byte aligned (plus 16 after the inventory in 6 files, and zero padding after H[15] in 4); lexicon2 is the engine's indexed lexicon with region-relative offsets; Danish H[2] points into it; no engine code stores phoneme offsets; the words at 0x6A/0x6E are kept raw. The save-time checks are in `checks.py`.
 
 Each answer is recorded in `REFERENCE.md` with its tag. If one contradicts this design (for example, absolute offsets inside lexicon2), the writer refuses size-changing edits that would break it until the format is decoded, and the spec is revised.
 

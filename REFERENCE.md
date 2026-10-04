@@ -689,10 +689,11 @@ The pipeline is `TEXT → DIG` (number grammar) `→ LEX` (exception lexicon) `�
 
 ## 5. Rule files (`bin/*.ivx`): format [CONFIRMED unless tagged]
 
-All multi-byte values are **big-endian**, which suggests the files were compiled on 68000-era tooling. The DLL converts them in place when loading (§5.1). Tools:
+All multi-byte values are **big-endian**, which suggests the files were compiled on 68000-era tooling. The DLL converts them in place when loading (§5.1). The files hold **no 68k machine code** [CONFIRMED]: the rule sections disassemble as 68000 code to junk (capstone: `ori.b #$8,(a0)`, an invalid word every few instructions), while the RULSYS decoder reads every rule to its exact length. The opcodes are multiples of 4 (jump-table offsets), so the original compiler and interpreter probably ran on a 68k machine [LIKELY]. Tools:
 
 - `tools/ivx.py`: parse the header and dump phoneme records.
 - `tools/ivxdasm.py`: validate (no args) or list the rule bytecode.
+- `editor/ivxedit`: a model of the whole file that writes all 12 files back byte-identical and relocates phoneme ids (`python -m unittest discover -s editor/tests -t editor`).
 
 ### 5.1 Loading (DLL side)
 
@@ -737,7 +738,9 @@ All multi-byte values are **big-endian**, which suggests the files were compiled
 | H[12] | Rule module M2 | `core+0xF8` |
 | H[13] | 128 class codes for ASCII 0x00–0x7F | `core+0x4AC` |
 | H[14] | 128 × 2-char transliterations of bytes 0x80–0xFF, then 128 class codes for 0x80–0xFF (so H[13] = H[14]+0x180). 0 in older files. Those use the DLL's built-in transliterations (`tp_xlat_char`, §5.5.1) and the built-in class codes for 0x80–0xFF at `0x100486E8` (`tp_class80`). | `core+0x4A8` |
-| H[15] | Body length | — |
+| H[15] | End of the data. Equal to the body length, except in am, it, no and sp, where 80, 64, 32 and 48 zero bytes follow it [CONFIRMED, `editor/tests/test_roundtrip.py`]. | — |
+
+**Section order and padding** [CONFIRMED on all 12 files, `editor/ivxedit` round trip]: the inventory at 0x170, then M3, M4, M0, M1, M5, M2, H[14], H[13], H[3]; absent sections are skipped. Every section starts on a 16-byte boundary, with zero padding. In da, fr, ge, it, no and sw the inventory is followed by 16 more zero bytes. Each rule module is a lead word, its rules and the words `04 00`; the lead words vary per file (`9401`, `1023`, `8888`…) and may be a date or version stamp [HYPOTHESIS]. In files without H[3], H[13] is followed by the indexed lexicon (§5.7). Danish H[2] points 0x1800 bytes into that region, past the last index target (0x16d0); what it addresses is unknown.
 
 The DLL converts class codes into char-class flag words at `core+0x4B2` (`0x1001ada0`). Codes −6 to 5 select, through jump table `0x1001aeb4`, one of 0x08/0x01/0x20/0x40/0x10/0x80/0x100/0x200/0x600 (lower-case letter)/0xA00 (upper-case letter)/0x1020/0x2100. Any other code makes a letter: 0x600 for `a`–`}`, 0xA00 for `A`–`]`, else 0x200 (all of 0x80–0xFF). The DLL then adds these fixed flags [CONFIRMED]:
 
@@ -846,6 +849,8 @@ Mutation check: 13 deliberate bugs were introduced into the port.
 
 This is a chain of records `[BE len][name char[2]][features u32][feature-defined mask u32][items…]`, terminated by len 0.
 
+- Names are two bytes; one-character names have a **leading** NUL (`00 2B` = `+`) [CONFIRMED].
+- Items are in ascending **signed** id order, so variables (ids ≥ 0x80) come first; each id at most once [CONFIRMED, all 1,557 records].
 - **The phoneme id used throughout the bytecode is the record's offset relative to H[8].** For example, Swedish id 0x12D2 = record at body 0x1442 = `S`.
 - The first record (len 0x30) holds defaults: initial values for variables 0xA2–0xAA.
 - The inventory contains phonemes (`A:`, `E0`, `2S` retroflex, …), allophones (lower-case names) **and** input symbols (`+ 1 ' " ` ; = , . # * _ -` digits, and so on). So text symbols, prosodic markers and phonemes share one segment list.
@@ -1062,7 +1067,7 @@ Opcodes are words that are multiples of 4. `op` below = operand size in bytes.
 | 00 | END | – | end of module |
 | 04 | BEGIN | – | module start (status 0x90) |
 | 08/0C | RULE/RULE* | len | start rule; scan from list head (0C = iterative mode) |
-| 10 | NEXT | rule# | advance start position and retry; operand = rule number |
+| 10 | NEXT | rule# | advance start position and retry. The operand is **never read** (`cw_op_NEXT` resets `ip` to the rule start, `src/cwflow.c:45`) [CONFIRMED]; it is the rule's number in the source [LIKELY] |
 | 40 | SEEK | ph | scan right for phoneme `ph`, set focus |
 | 44 | FOCUS | ph | current must be `ph`; set focus |
 | 48 | SCAN | ph | scan right for `ph` (no focus) |
@@ -1073,7 +1078,7 @@ Opcodes are words that are multiples of 4. `op` below = operand size in bytes.
 | 6C / 9C | RP / LP | {min:8, opt:8} pattern | right/left context: `min` (high byte) mandatory matches, then up to `opt` (low byte) optional ones (0x007F = `*`) |
 | B0 | FNEXT | – | focus = focus→next (not used by any rule file) |
 | B4 | UNWRAP | n | **delete** n segments from the focus (with their item blocks) and restart the rule; n = 0 → status 0x60 [CONFIRMED] |
-| B8/BC | REPL+/REPL | w, ids… | replace: delete `d`, insert `n` phonemes, where `w = d·256 + 12·n` (12·n may carry into the high byte). Old nodes are reused first. New segments take feat/mask from their inventory record and the bookmark of the last deleted segment. If the next op is NEXT, matching continues after the new segments. B8 acts one segment later.  A count that is not a multiple of 12 (12·n carried into the high byte) wraps in the DLL; the port stops with status 0x10 (a guard, §2.2.2). |
+| B8/BC | REPL+/REPL | w, ids… | replace: delete `d`, insert `n` phonemes, where `w = d·256 + 12·n` (12·n may carry into the high byte). Old nodes are reused first. New segments take feat/mask from their inventory record and the bookmark of the last deleted segment. If the next op is NEXT, matching continues after the new segments. B8 acts one segment later.  A count that is not a multiple of 12 (12·n carried into the high byte) wraps in the DLL; the port stops with status 0x10 (a guard, §2.2.2). Five shipped words carry: Danish 0x314, 0x320, 0x32c ×2, Icelandic 0x1108 [CONFIRMED]. |
 | C0/C4 | SETF+/SETF | V M | `feat = feat&~M \| V`, `mask = mask&~V \| M` |
 | C8 | GEMIN | (rule#) | find adjacent equal phonemes with feature bits 0x10002, set bit 4 in feat and mask of both, then NEXT. The following word is never read. |
 | CC/D0/D4 | CPREV/CHEAD/CTAIL | – | next = focus→prev (retry if the focus is first) / list head / list tail |
@@ -1084,6 +1089,8 @@ Opcodes are words that are multiples of 4. `op` below = operand size in bytes.
 | 1A8–1C4 | B=Rn / Rn=A | – | scratch registers |
 | 1C8/1CC | B=V / V=A | n | global variables (unchecked index; not used by any rule file) |
 | 1F0–1F8 | – | (1 word) | `0x10022ca0` skips one operand word. Not used by any rule file. |
+
+**Phoneme ids that point at the inventory's terminator** [CONFIRMED]: 1 operand in `frrules.ivx` (0x1bae) and 7 in `itrules.ivx` (0xe3c) equal the offset of the inventory's 0 terminator, so they name a phoneme that does not exist (no segment can match it). Probably a rule-compiler artifact for an undefined symbol [HYPOTHESIS]. Every other phoneme-id operand in the 12 files is a record start. The rule bytecode is the only place a file stores phoneme offsets: at run time every segment's id comes from `ph_find` (by name, `src/tpelem.c:274`) or from a rule operand [CONFIRMED, every `phinv` use in `src/`].
 
 Status codes (`Core.status`): 0x10 bad opcode, 0x20 LD without item or default, 0x21 LD of an empty item, 0x22/0x23 invalid ST delete, 0x30–0x33 divide by zero, **0x40 out of pool nodes**, 0x50 bad parameter-test op, 0x60 UNWRAP 0, 0x90 end of module (returned as 0) [CONFIRMED].
 
@@ -1107,7 +1114,7 @@ Operand formats [CONFIRMED by the C port, §5.6.1]:
 The interpreter is ported function by function to `src/contwork.c` and `src/cw*.c`, one file per original source file, plus the list helpers in `src/tpelem.c` (now complete, see §5.3.1). That covers all 89 functions of 0x1001fe90–0x10022caf, including `ctl_word_end`, which drives the tp/op pipeline (§5.5.1). The item-storage functions (`cw_find_item`, `cw_item_insert`, `cw_st_*`) were written from the disassembly, because the decompiler mistyped their node arithmetic.
 
 - **Item storage:** a Seg holds 12 inline item words (24 bytes) at +0x20 and continues into a chain of `ItemBlk` nodes (`Seg.ext`, then `ItemBlk.next`; `ItemBlk.prev` points back to the previous block or the Seg). Each block holds 23 words (0x2E bytes) at +0xA.
-- **Ordering:** items may straddle node boundaries. They are sorted by descending signed id on segments, but by ascending id in phoneme records.
+- **Ordering:** items may straddle node boundaries. They are sorted by descending signed id on segments, but by ascending signed id in phoneme records (§5.4).
 
 `tests/cw_cmp.c` patches the DLL's `run_module` so that every module run is also executed by the port. Before each run it copies the DLL's Core and node pool with typed pointer relocation (`tests/harness.c`). Afterwards it compares the status and every dword of the Core and pool: the Core's pointer fields through the relocation, all other fields exactly.
 
@@ -1125,7 +1132,8 @@ Example (`swrules.ivx` M0, rule #32): `SEEK + ; R B ; REPL del 2 -> S`, i.e. the
 - `BE u32 length`, then ASCII-sorted entries `0x7F orth 0x00 transcription 0x00`. `lex_lookup` binary-searches them (§5.5.1). The first bytes after the length (`20 00 "es" 00`) sit where the search's lower bound starts, so they are read as an ordinary first entry, key " " → "es" [LIKELY].
 - Transcriptions use the RULSYS notation (`'` `"` stress, `#` compound boundary, `:` length, `E0` schwa; Swedish ISO-646-SE `[`=Ä, `\`=Ö, `]`=Å). They often end in lower-case class/POS tags: `a b kn v s r …` [HYPOTHESIS].
 - Examples: `%` → `PROS'ENT`, `!` → `"U:TROPS#T'EKE0N`.
-- Only Swedish and British English have H[3]. Danish has H[2] and the external `darules.dll`. The other languages rely on rules.
+- The size dword counts itself. The entries end with one or more 0x7F bytes, up to a 16-byte boundary [CONFIRMED, sw 2, bl 3]. The order is non-decreasing: sw has 6 and bl 10 repeated headwords (`BORT` twice with different transcriptions, `LOSE` twice the same) [CONFIRMED].
+- Only Swedish and British English have H[3]. **The other 10 files have an indexed lexicon instead** [CONFIRMED, `ivx_bind` `src/ttsctrl.c:517-525`, `lex_lookup` `src/tpstr.c:415`]: a 128-word index at H[13] + 0x80 (one entry per first byte, offsets relative to H[13] + 0x180), then the entries at H[13] + 0x180. Keys lack their first byte, strings are padded to even length, and each first-byte group ends with 0x7F. Examples: German `!` → `'UM#GE0K'E:R`, Spanish `ABR'IR INTERROGATHI'ON`. Danish also has H[2] (§5.2) and the external `darules.dll`.
 
 ### 5.8 Versions
 
