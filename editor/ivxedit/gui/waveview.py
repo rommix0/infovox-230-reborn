@@ -112,17 +112,30 @@ class SignalView(QWidget):
             y += STRIP_H + GAP
         p.end()
 
-    def _wave(self, p, row, y):
-        w = self.width()
+    def _sample_range(self, row):
         s = row.speech
-        i0, i1 = (max(0, min(len(s.samples), int(t * s.fs))) for t in (self.t0, self.t1))
-        if i1 <= i0 or w <= 0:
+        return tuple(max(0, min(len(s.samples), int(t * s.fs))) for t in (self.t0, self.t1))
+
+    def wave_columns(self, row):
+        """-> (start_x, n): the columns the row's samples cover in the current view"""
+        s = row.speech
+        i0, i1 = self._sample_range(row)
+        x0 = max(0, round(self.x_of(i0 / s.fs)))
+        x1 = min(self.width(), round(self.x_of(i1 / s.fs)))
+        return x0, max(0, x1 - x0)
+
+    def _wave(self, p, row, y):
+        s = row.speech
+        i0, i1 = self._sample_range(row)
+        x0, n = self.wave_columns(row)
+        if i1 <= i0 or n <= 0:
             return
-        lo, hi = dsp.minmax(s.samples[i0:i1], w)
+        lo, hi = dsp.minmax(s.samples[i0:i1], n)
         mid, scale = y + WAVE_H / 2, WAVE_H / 2 / 32768
         p.setPen(QPen(QColor('#3060a0')))
-        for x in range(w):
-            p.drawLine(x, int(mid - hi[x] * scale), x, int(mid - lo[x] * scale))
+        for k in range(n):
+            x = x0 + k
+            p.drawLine(x, int(mid - hi[k] * scale), x, int(mid - lo[k] * scale))
 
     def _spec(self, p, row, y):
         f0, f1 = self.t0 / row.hop, self.t1 / row.hop

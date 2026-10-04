@@ -6,10 +6,11 @@ import numpy as np
 from tests.qt import SlotErrors, app, needs_qt
 
 
-def fake_speech():
+def fake_speech(seconds=1.0):
     from ivxedit.speak import Event, Speech
     fs = 16000
-    samples = (np.sin(2 * np.pi * 440 * np.arange(fs) / fs) * 20000).astype(np.int16)
+    n = int(fs * seconds)
+    samples = (np.sin(2 * np.pi * 440 * np.arange(n) / fs) * 20000).astype(np.int16)
     return Speech(wav=b'', samples=samples, fs=fs,
                   events=[Event(0.0, 'phoneme', ''), Event(0.5, 'phoneme', 'A:')])
 
@@ -50,6 +51,20 @@ class SignalViewTest(unittest.TestCase):
         v.reset_view()
         self.assertEqual((v.t0, v.t1), (0.0, 1.0))
         self.assertAlmostEqual(v.x_of(v.t_of(123)), 123)
+
+    def test_rows_of_different_length_keep_their_own_time_scale(self):
+        v = self.v
+        long_, short = fake_speech(1.0), fake_speech(0.5)
+        with SlotErrors() as errors:
+            v.set_results([('A', long_), ('B', short)])
+            v.grab()
+            self.assertEqual(v.wave_columns(v.rows[0]), (0, 800))
+            self.assertEqual(v.wave_columns(v.rows[1]), (0, 400))
+            v.zoom(0.5, 400)                    # view 0.25 .. 0.75 s
+            v.grab()
+            self.assertEqual(v.wave_columns(v.rows[1]), (0, 400))
+            self.assertEqual(v.wave_columns(v.rows[0]), (0, 800))
+        self.assertEqual(errors, [])
 
 
 if __name__ == '__main__':

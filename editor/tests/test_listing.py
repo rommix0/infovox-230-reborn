@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from ivxedit.listing import MNEMONICS, rule_line
+from ivxedit.listing import MNEMONICS, ph_text, rule_line
 from ivxedit.model import Phoneme, PhRef, load
 from ivxedit.rules import Instr, Rule, rep_split
 from tests.util import LANGS, ivx_bytes
@@ -33,6 +33,19 @@ class ListingTest(unittest.TestCase):
         self.assertEqual(line(Instr(0xBC, [0x0314] + [PhRef(A)] * 23)),
                          'RULE REPL del 2 -> ' + ' '.join(['A:'] * 23))      # a carrying word
         self.assertEqual(line(Instr(0x150, [0xFFFB]), Instr(0x188, [3, 2])), 'RULE A= -5 ; A*=frac 3/2^2')
+
+    def test_semicolon_phoneme_is_not_the_separator(self):
+        # the phoneme named ';' (b'\0;') used to collide with the ' ; ' instruction separator
+        f = load(ivx_bytes('sw'))
+        by = {bytes(p.name).lstrip(b'\0'): p for p in f.phonemes}
+        a, semi, r, b = (PhRef(by[n]) for n in (b'A', b';', b'R', b'B'))
+        one = line(Instr(0xBC, [0x010C, a]), Instr(0x4C, [b]), Instr(0x10, [5]))
+        two = line(Instr(0xBC, [0x0130, a, semi, r, b]), Instr(0x10, [5]))
+        self.assertNotEqual(one, two)
+        self.assertEqual(two, 'RULE REPL del 1 -> A ⁏ R B ; NEXT #5')
+        # only the exact name ';' is escaped
+        self.assertEqual(ph_text(PhRef(Phoneme(b'\0;', 0, 0, []))), '⁏')
+        self.assertEqual(ph_text(PhRef(Phoneme(b';1', 0, 0, []))), ';1')
 
     def test_ld_st(self):
         self.assertEqual(line(Instr(0x100, [0x0005, 0x0000])), 'RULE LD F1@0')

@@ -3,9 +3,11 @@
 A line is 'RULE' or 'RULE*', then the rule's instructions, each a mnemonic and its
 operands, separated by ' ; '. Every operand word is in the text, so a line determines its
 rule's words; the parser that reads lines back comes with the rule notation (step 3).
-Tokens are separated by single spaces, and an operand's kind follows from its position:
+Tokens are separated by single spaces (a parameter test <...> is one token with spaces
+inside its brackets), and an operand's kind follows from its position:
 
-  phoneme      its name: A:  +  [  ;  (the name ' ' is written ␠); 'NAME+d' for a
+  phoneme      its name: A:  +  [  (the name ' ' is written ␠, the name ';' is written ⁏
+               so that it cannot be taken for the ' ; ' separator); 'NAME+d' for a
                reference d bytes into a record; <end> for the inventory's terminator
   raw word     #hhhh: a phoneme id that is not in the inventory, or any word of an
                instruction whose operands do not have their opcode's shape
@@ -83,7 +85,7 @@ def ph_text(ref):
         name = '<end>'
     else:
         name = ph_name(ref.ph.name)
-        name = '␠' if name == ' ' else name
+        name = {' ': '␠', ';': '⁏'}.get(name, name)
     return name + ('+%d' % ref.delta if ref.delta else '')
 
 

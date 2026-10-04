@@ -42,10 +42,10 @@
    - The first event of an utterance is a phoneme with value 0, which prints a NUL.
    - The parser cuts by column and strips the NUL and trailing spaces.
 2. **Speak through the model is byte-identical to `ivxsay` on the file** for the test texts of all 12 languages. That covers both the WAV and the event list (`tests/test_speak.py`).
-3. **Phoneme names include `;`, `[`, `{`, `<` and a single space** (`b'\x00 '`). Names are unique within each file.
+3. **Phoneme names include `;`, `[`, `{`, `}` and a single space** (`b'\x00 '`). Names are unique within each file.
    - The instruction form therefore writes tokens separated by single spaces and decides an operand's kind by its position.
    - Patterns are written `{ … }` with spaced braces.
-   - The space name is written `␠`.
+   - The space name is written `␠`. The name `;` is written `⁏` (final review: it collided with the separator).
 4. **Every operand in the 15,564 shipped rules has its opcode's shape.** All pattern tests parse, no pattern has header bits 0x1001 set, and every LD/ST index word has `w & 0x017F == 0`. So the listing never needs raw `#hhhh` words for a shipped file (`test_every_shipped_rule_has_typed_operands`).
 5. **Opcodes that the old disassembler listed under the same mnemonic** get distinct ones here:
    - `0x178 A/=` vs `0x180 A/=*` (they differ only in the divide-by-zero status, `src/cwmath.c`);

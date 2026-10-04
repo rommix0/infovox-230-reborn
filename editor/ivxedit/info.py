@@ -18,7 +18,7 @@ A1_TYPES = {
 # class codes -6..5 -> class flags (ivx_build_class_flags, src/ttsctrl.c)
 CODE_FLAGS = (0x008, 0x001, 0x020, 0x040, 0x010, 0x080, 0x100, 0x200, 0x600, 0xA00, 0x1020, 0x2100)
 FLAG_NAMES = ((0x001, 'ignored'), (0x002, 'blank'), (0x004, 'line break'),
-              (0x010, 'sentence end'), (0x040, 'number separator'), (0x080, 'digit'),
+              (0x010, 'sentence punctuation'), (0x040, 'number separator'), (0x080, 'digit'),
               (0x100, 'symbol'), (0x200, 'letter'), (0x400, 'lower case'),
               (0x800, '@D prefix in mode 2'), (0x2000, 'name "c%"'))
 

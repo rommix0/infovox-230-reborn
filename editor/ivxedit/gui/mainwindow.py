@@ -88,14 +88,15 @@ class MainWindow(QMainWindow):
         """load path into the window; raises OSError or IvxFormatError"""
         data = Path(path).read_bytes()
         f = load(data)
+        uses = phoneme_uses(f)
+        problems = check(f)
         self.f, self.path = f, Path(path)
-        self.uses = phoneme_uses(f)
+        self.uses = uses
         for v in self.rule_views.values():
             self.stack.removeWidget(v)
             v.deleteLater()
         self.rule_views = {}
         self.speak.set_model(f, data)
-        problems = check(f)
         self.problems.setText('Problems (%d)' % len(problems))
         self.problems.setToolTip('\n'.join(str(p) for p in problems))
         self._fill_tree()
