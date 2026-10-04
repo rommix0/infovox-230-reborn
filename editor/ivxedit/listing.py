@@ -490,10 +490,29 @@ def words(rule):
     return encode_rule(rule, lambda ref: (id(ref.ph), ref.delta))
 
 
-def check_length(rule):
-    """refuse a rule longer than its length word holds"""
+# where the word that fixes an instruction's operand count lies, in words after its opcode
+COUNT_WORD = {0x68: 1, 0x6C: 2, 0x9C: 2, REPL: 1, REPL_NEXT: 1, 0x100: 1, 0x104: 1, 0x108: 1, 0x10C: 1}
+
+
+def check_length(rule, poss=None):
+    """refuse a rule longer than its length word holds, or whose instructions would not take
+    the operand words they have when the rule is read back (the count of FOCUSP, RP, LP, REPL
+    and LD/ST comes from a word that may be the next instruction's); returns the rule. poss: the
+    text column of each instruction, for the error"""
     if 2 + 2 * sum(1 + len(i.args) for i in rule.instrs) > 0xFFFF:
         raise ParseError('the rule is longer than 65535 bytes')
+    ws, starts = [], []
+    for ins in rule.instrs:
+        starts.append(len(ws))
+        ws += [ins.op] + [a if isinstance(a, int) else 0 for a in ins.args]
+    data = pack_words(ws + [0, 0])
+    for i, (ins, k) in enumerate(zip(rule.instrs, starts)):
+        name, pos = MNEMONICS[ins.op], poss[i] if poss else 0
+        if k + COUNT_WORD.get(ins.op, 0) >= len(ws):
+            raise ParseError('%s lacks the word that gives its operand count' % name, pos)
+        n = operand_count(data, 2 * k)
+        if n != len(ins.args):
+            raise ParseError('%s has %d operand words here, not %d' % (name, n, len(ins.args)), pos)
     return rule
 
 
@@ -502,9 +521,10 @@ def parse_rule(text, names):
     head, sep, body = text.partition(' ')
     if head not in ('RULE', 'RULE*'):
         raise ParseError('a line starts with RULE or RULE*', 0)
-    instrs, pos = [], len(head) + 1
+    instrs, poss, pos = [], [], len(head) + 1
     if sep:
         for part in body.split(' ; '):
             instrs.append(_read_instr(part, pos, names))
+            poss.append(pos)
             pos += len(part) + 3
-    return check_length(Rule(head == 'RULE*', instrs))
+    return check_length(Rule(head == 'RULE*', instrs), poss)

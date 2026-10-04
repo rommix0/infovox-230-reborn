@@ -195,7 +195,12 @@ class ParseTest(unittest.TestCase):
                      'RULE FROB', 'RULE REPL del 0 ->' + ' A:' * 64, 'RULE REPL del 300 -> A:', 'RULE REPL #0124 A:',
                      'RULE LD F1', 'RULE LD v80@0', 'RULE LD F1@64', 'RULE LD Q1@0', 'RULE ST vac t=0',
                      'RULE RP 300,0 { + }', 'RULE FOCUSP { #8004 }', 'RULE FOCUSP { <F1 ~ 5> }',
-                     'RULE SETF [0010/0110]', 'RULE A= +', 'RULE SEEK A:+x', 'RULE* ', 'rule SEEK +'):
+                     'RULE SETF [0010/0110]', 'RULE A= +', 'RULE SEEK A:+x', 'RULE* ', 'rule SEEK +',
+                     # spec Testing 7: the count word of these lies past the rule or is the next opcode
+                     'RULE FOCUSP', 'RULE FOCUSP ; REPL del 0 -> A: ; NEXT #1',
+                     'RULE SEEK A: ; RP #0300 ; NEXT #1', 'RULE SEEK A: ; CPREV ; LP #0300 ; NEXT #1',
+                     'RULE SEEK A: ; RP #0300', 'RULE SEEK A: ; LD', 'RULE REPL', 'RULE SEEK A: ; ST',
+                     'RULE SCANF [00060000/00070000] ; R A: ; R + ; FOCUSP ; REPL del 0 -> + ; NEXT #2080'):
             with self.subTest(text=text):
                 with self.assertRaises(ParseError):
                     parse_rule(text, NAMES)
@@ -215,6 +220,20 @@ class ParseTest(unittest.TestCase):
         with self.assertRaises(ParseError) as cm:
             parse_rule('RULE SEEK A:+99999', NAMES)
         self.assertEqual(cm.exception.pos, 13)
+
+    def test_count_word_may_be_the_next_instruction(self):
+        # a loaded file can hold FOCUSP whose count word is the next instruction's opcode (END = 0)
+        rule = parse_rule('RULE FOCUSP ; END', NAMES)
+        self.assertEqual(rule_line(rule).text, 'RULE FOCUSP ; END')
+        self.assertTrue(reads_back(rule, lambda ref: 0))
+
+    def test_count_error_column(self):
+        for text, col in (('RULE SEEK A: ; FOCUSP ; REPL del 0 -> A:', 15),
+                          ('RULE SEEK A: ; RP #0300', 15)):
+            with self.subTest(text=text):
+                with self.assertRaises(ParseError) as cm:
+                    parse_rule(text, NAMES)
+                self.assertEqual(cm.exception.pos, col)
 
     def test_error_column(self):
         with self.assertRaises(ParseError) as cm:

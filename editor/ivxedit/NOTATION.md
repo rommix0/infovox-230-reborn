@@ -95,8 +95,16 @@ order. A second or later group always has `→⁺`: it acts on the segments afte
 the group before it left. A group with no phonemes and no `∅` has one element on its
 left-hand side. `REPL` inserts at most 21 phonemes and deletes at most 255 segments.
 
+A bundle or a statement acts on the focus as it is at that point, and only `REPL` moves it
+to a new place:
+- after a `REPL` that inserts phonemes, the focus is the last inserted segment: in
+  `W iy → D ah B Y [−b0]` the bundle clears `b0` on `Y` only (the same for statements);
+- after a `REPL` that inserts nothing (`→ ∅`), it is the segment before the deleted ones;
+- `SETF` does not move the focus. `SETF+` and `REPL+` first move it one segment right, and
+  what follows acts there.
+
 Statements, in `{ }` and separated by `;`, work on the focus segment's items and the
-accumulator (REPLs and SETFs before them may have moved the focus):
+accumulator (on the focus as the list above leaves it):
 
 | Statement | Instructions |
 |---|---|
@@ -109,20 +117,41 @@ Item operands are as in instruction form: `F1@k` (payload word k, `.hi` for the 
 `F1@#hhhh` for an index word with other bits), `vXX`, then ` t=N` for a nonzero high byte
 of the spec word.
 
+## How a match runs
+
+- The rule is tried at each segment in turn: the start position. When a test fails, it is
+  tried again at the next start position, until the list is used up.
+- `^` does not mean the start of the word. It means no search for that element: it is
+  tested at the start position itself. Without `^` the first element is searched for to
+  the right.
+- A search (the first element, `…`) moves the start position to the segment it finds. If
+  the rest of the match fails, the rule resumes after that segment.
+- `(X)` is optional, but at the end of the segment list it fails, as a required element
+  does: the rule gives up there.
+- `:=s` and `:=u` clamp the accumulator itself (to −127…127 and 0…255) before storing it, so
+  `A` has the clamped value afterwards.
+- `once`: the rule has no `NEXT`. At its last instruction the interpreter goes on to the next
+  rule, so it acts at the first start position where it matches and is not tried at
+  later ones.
+
 ## Equivalent spellings
 
-These give the same words, and the editor writes the first:
+For example, these give the same words, and the editor writes the first:
 - `A[+b20]` and `A[+b20]{1}` (an element that is a pattern anyway);
 - `{ vac := 5 }` and `{ A= 5; vac := A }`;
 - `{ x; y }` and `{ x } { y }`;
 - the same number or bit set written another way: `B{1,0}` and `B{1}`, `B{0,127}` and `B*`,
   `#01` and `#1`, `[−b24 +b20]` and `[+b20 −b24]` (bits in any order), `<F1 = -0>` and
-  `<F1 = 0>`, `<F1 = 65535>` and `<F1 = -1>`.
+  `<F1 = 0>`, `<F1 = 65535>` and `<F1 = -1>`;
+- `‹A›` and `A`, `‹ ›` and `␠` (a plain name in quotes);
+- `F1@#0000` and `F1@0`, `F1@#0080` and `F1@0.hi` (an index word that has a plain spelling);
+- spacing: `( A)` and `(A)`.
 
 ## Examples
 
-Each notation line is followed by its instruction form (`swrules.ivx`; checked by
-`tests/test_notation.py`):
+Each notation line is followed by its instruction form. The first four are rules of
+`swrules.ivx`; the other six are made by hand over its phoneme inventory. Checked by
+`tests/test_notation.py`:
 
 ```text
 #32 + B → S
