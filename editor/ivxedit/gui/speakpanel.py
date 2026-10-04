@@ -6,7 +6,7 @@ from PySide6.QtCore import QThread, QUrl, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from ..speak import Options, SpeakError, find_ivxsay, speak_bytes, speak_model
+from ..speak import Options, SpeakError, find_ivxsay, model_bytes, speak_bytes
 from .waveview import SignalView
 
 RATES = (8000, 11025, 16000, 22050, 32000, 44100, 48000)
@@ -17,9 +17,10 @@ class SpeakJob(QThread):
     done = Signal(list)
     failed = Signal(str)
 
-    def __init__(self, calls):
+    def __init__(self, calls, model):
         super().__init__()
         self.calls = calls          # [(title, function returning Speech)]
+        self.model = model          # the model the job speaks (results for another are dropped)
 
     def run(self):
         try:
@@ -98,21 +99,29 @@ class SpeakPanel(QWidget):
         if exe is None:
             self.status.setText('ivxsay not found: run make in the repository root, or set it in File ▸ ivxsay…')
             return
-        text, opts, f, orig = self.text.text(), self.options(), self.model, self.original
+        try:
+            edited = model_bytes(self.model)   # here, not in the job: edits may follow at once
+        except SpeakError as e:
+            self.status.setText(str(e))
+            return
+        text, opts, orig = self.text.text(), self.options(), self.original
         calls = []
         if self.ab.isChecked():
             calls.append(('A: as opened', lambda: speak_bytes(orig, text, opts, exe)))
         calls.append(('B: edited' if self.ab.isChecked() else 'Edited',
-                      lambda: speak_model(f, text, opts, exe)))
+                      lambda: speak_bytes(edited, text, opts, exe)))
         self.status.setText('Speaking…')
         self.button.setEnabled(False)
-        self.job = SpeakJob(calls)
+        self.job = SpeakJob(calls, self.model)
         self.job.done.connect(self._done)
         self.job.failed.connect(self._failed)
         self.job.start()
 
     def _done(self, results):
         self.button.setEnabled(True)
+        if self.sender() is not None and self.sender().model is not self.model:
+            self.status.setText('')                # spoken with a file that is no longer open
+            return
         self.results = results
         self.view.set_results(results)
         sp = results[-1][1]
@@ -122,6 +131,9 @@ class SpeakPanel(QWidget):
 
     def _failed(self, message):
         self.button.setEnabled(True)
+        if self.sender() is not None and self.sender().model is not self.model:
+            self.status.setText('')
+            return
         self.status.setText(message)
 
     def play(self, speech):

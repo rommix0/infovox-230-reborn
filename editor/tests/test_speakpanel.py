@@ -71,8 +71,31 @@ class SpeakPanelTest(unittest.TestCase):
         del self.win.f.modules['M0']           # M0 is required (checks)
         self.panel.text.setText('God morgon.')
         self.panel.button.click()
-        wait_for(self.panel)
+        self.assertIsNone(self.panel.job)      # refused before a job starts
         self.assertIn('M0', self.panel.status.text())
+
+    @unittest.skipIf(SAY is None, 'ivxsay is not built: run make (or set IVXSAY)')
+    def test_speaks_the_model_as_it_was_when_asked(self):
+        self.settings.setValue('ivxsay', str(SAY))
+        self.win.open_file(ivx_path('sw'))
+        p = self.panel
+        p.text.setText('God morgon.')
+        p.button.click()
+        del self.win.f.modules['M0']           # an edit while the job runs does not reach it
+        wait_for(p)
+        self.assertEqual([t for t, _ in p.results], ['Edited'])
+        self.assertTrue(p.results[0][1].phonemes)
+
+    @unittest.skipIf(SAY is None, 'ivxsay is not built: run make (or set IVXSAY)')
+    def test_results_for_a_closed_file_are_dropped(self):
+        self.settings.setValue('ivxsay', str(SAY))
+        self.win.open_file(ivx_path('sw'))
+        p = self.panel
+        p.text.setText('God morgon.')
+        p.button.click()
+        self.win.open_file(ivx_path('ge'))
+        wait_for(p)
+        self.assertEqual((p.results, p.status.text()), ([], ''))
 
     @unittest.skipIf(SAY is None, 'ivxsay is not built: run make (or set IVXSAY)')
     def test_close_while_speaking(self):

@@ -51,7 +51,8 @@ class InfoTest(unittest.TestCase):
         self.assertEqual(rows[ord('A')][:2], (0x41, 'A'))
         self.assertIsNotNone(rows[0xE5][4])                          # sw has H[14]
         self.assertEqual(char_rows(am)[0xE5][2:], (None, None, None))   # am: built-in tables
-        self.assertEqual(len(char_rows(ge)[0xC4][4]), 2)
+        self.assertEqual([char_rows(ge)[ch][4] for ch in (0x80, 0xC4)], ['"C', ''])   # without NUL padding
+        self.assertEqual(rows[0x84][4], '{')
 
     def test_header_fields(self):
         fields = dict(header_fields(load(ivx_bytes('sw'))))

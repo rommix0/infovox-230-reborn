@@ -78,9 +78,9 @@ def flags_text(fl):
 
 
 def char_rows(f):
-    """the 256 rows of the Characters view: (byte, char, class code, flags, transliteration);
-    code, flags and transliteration are None for 0x80-0xFF in files without H[14], which
-    use the engine's built-in tables"""
+    """the 256 rows of the Characters view: (byte, char, class code, flags, transliteration
+    without its NUL padding); code, flags and transliteration are None for 0x80-0xFF in
+    files without H[14], which use the engine's built-in tables"""
     rows = []
     for ch in range(256):
         c = bytes([ch]).decode('cp1252', errors='replace')
@@ -89,7 +89,7 @@ def char_rows(f):
             code, xl = s8(f.class_lo[ch]), None
         elif f.class_hi is not None:
             code = s8(f.class_hi[ch - 0x80])
-            xl = f.xlat_hi[2 * (ch - 0x80):2 * (ch - 0x80) + 2].decode('latin-1')
+            xl = f.xlat_hi[2 * (ch - 0x80):2 * (ch - 0x80) + 2].decode('latin-1').rstrip('\0')   # '{\0' = '{'
         else:
             code = xl = None
         rows.append((ch, shown, code, None if code is None else char_flags(ch, code), xl))
