@@ -57,7 +57,7 @@ class MainWindow(QMainWindow):
         self.module_items = {}        # module name -> its tree item
         self.rule_views = {}          # module name -> RulesView, per open file
         self.names = {}               # ph_names of the open file
-        self.notation = {}            # module name -> [notation Line or None] per rule
+        self.notation = {}            # Rule -> its notation Line, or None
         self.target = None            # what the last edit, undo or redo changed (Edit.target)
         self.shape = None             # the names and counts the tree shows
         self.origin = self.pushing = None   # (tree item data) the view a new edit was made in
@@ -268,7 +268,8 @@ class MainWindow(QMainWindow):
 
     def _shape(self):
         lex = self.f.lexicon
-        return (tuple((id(p), p.name) for p in self.f.phonemes), None if lex is None else len(lex.entries))
+        return (tuple((id(p), p.name) for p in self.f.phonemes), None if lex is None else len(lex.entries),
+                tuple((n, len(m.rules)) for n, m in sorted(self.f.modules.items())))
 
     def _changed(self):
         """after an edit, undo or redo: problems, title, the tree's names and counts, and
@@ -280,6 +281,7 @@ class MainWindow(QMainWindow):
         if shape != self.shape:
             self.shape = shape
             self._fill_tree(self._current())
+        self.uses = phoneme_uses(self.f)              # rule edits change "Used by"
         self._problems()
         self._title()
         self._refresh_timer.start(0)                  # not inside the signal of the edited widget
@@ -490,22 +492,27 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.text_view)
 
     def _notation(self, name):
-        """[notation Line or None] for each rule of module `name`, made once per file"""
-        if name not in self.notation:
-            self.notation[name] = [notation_line(r, self.names) for r in self.f.modules[name].rules]
-        return self.notation[name]
+        """[notation Line or None] for each rule of module `name`, made once per rule"""
+        out = []
+        for r in self.f.modules[name].rules:
+            if r not in self.notation:
+                self.notation[r] = notation_line(r, self.names)
+            out.append(self.notation[r])
+        return out
 
     def _in_notation(self, name):
         return sum(n is not None for n in self._notation(name))
 
     def _rules_view(self, name):
+        """the view of module `name`, showing its rules as they are now"""
         if name not in self.rule_views:
-            v = RulesView(self.show_phoneme)
+            v = RulesView(self.show_phoneme, self.try_edit, lambda text: self.statusBar().showMessage(text, 10000))
             v.set_instruction_form(self.instr_action.isChecked())
-            v.set_module(name, self.f.modules[name], self._notation(name))
             self.stack.addWidget(v)
             self.rule_views[name] = v
-        return self.rule_views[name]
+        v = self.rule_views[name]
+        v.set_module(name, self.f.modules[name], self._notation(name), self.f, self.names)
+        return v
 
     def set_instruction_form(self, on):
         """View ▸ Instruction form: every rule in instruction form, or notation where it exists"""
