@@ -135,7 +135,7 @@ class SpeakPanel(QWidget):
             self._player.setAudioOutput(QAudioOutput(self._player))
         self._player.stop()
         if self._tmp is None:
-            self._tmp = tempfile.TemporaryDirectory(prefix='ivxedit-play-')
+            self._tmp = tempfile.TemporaryDirectory(prefix='ivxedit-play-', ignore_cleanup_errors=True)
         self._plays += 1                    # a new file each time: the old one may be open
         path = Path(self._tmp.name) / ('play%d.wav' % self._plays)
         path.write_bytes(speech.wav)
@@ -143,7 +143,11 @@ class SpeakPanel(QWidget):
         self._player.play()
 
     def cleanup(self):
-        """stop playing and remove the played WAVs"""
+        """wait for a running job, stop playing and remove the played WAVs"""
+        if self.job is not None and self.job.isRunning():
+            self.job.done.disconnect(self._done)      # no slot may run on a closing panel
+            self.job.failed.disconnect(self._failed)
+            self.job.wait()
         if self._player is not None:
             self._player.stop()
             self._player.setSource(QUrl())

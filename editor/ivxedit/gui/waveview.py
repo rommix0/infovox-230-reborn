@@ -97,6 +97,7 @@ class SignalView(QWidget):
         if not self.rows:
             p.setPen(pal.text().color())
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, 'Type a text and press Speak')
+            p.end()
             return
         y = 0
         for row in self.rows:

@@ -74,6 +74,18 @@ class SpeakPanelTest(unittest.TestCase):
         wait_for(self.panel)
         self.assertIn('M0', self.panel.status.text())
 
+    @unittest.skipIf(SAY is None, 'ivxsay is not built: run make (or set IVXSAY)')
+    def test_close_while_speaking(self):
+        self.settings.setValue('ivxsay', str(SAY))
+        self.win.open_file(ivx_path('sw'))
+        self.panel.text.setText('God morgon. ' * 40)
+        with SlotErrors() as errors:
+            self.panel.button.click()
+            self.win.close()
+        self.assertEqual(errors, [])
+        self.assertFalse(self.panel.job.isRunning())
+        self.assertEqual(self.panel.status.text(), 'Speaking…')   # the done slot was disconnected
+
     def test_options(self):
         p = self.panel
         self.assertEqual(p.options().args(), ['-s', '22050'])
