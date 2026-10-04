@@ -9,8 +9,9 @@ import numpy as np
 
 from ivxedit import dsp
 from ivxedit.model import load
-from ivxedit.speak import (Event, Options, SpeakError, find_ivxsay, parse_events, read_wav,
-                           speak_bytes, speak_model)
+from ivxedit.speak import (Event, Options, SpeakError, find_ivxsay, model_bytes, parse_events,
+                           read_wav, speak_bytes, speak_model)
+from ivxedit.writer import to_bytes
 from tests.util import LANGS, ivx_bytes, ivx_path, ivxsay, lang_texts
 
 SAY = ivxsay()
@@ -62,6 +63,14 @@ class EventsTest(unittest.TestCase):
         f.phonemes.remove(next(ph for ph in f.phonemes if ph.name == b'\0+'))   # rules use '+'
         with self.assertRaisesRegex(SpeakError, 'problem'):
             speak_model(f, 'God morgon.', exe=Path('never-run'))
+
+    def test_model_bytes(self):
+        f = load(ivx_bytes('sw'))
+        f.phonemes[2].name = f.phonemes[1].name                # a warning only: still spoken
+        self.assertEqual(model_bytes(f), to_bytes(f))
+        del f.modules['M0']
+        with self.assertRaisesRegex(SpeakError, 'M0'):
+            model_bytes(f)
 
 
 @unittest.skipIf(SAY is None, 'ivxsay is not built: run make (or set IVXSAY)')

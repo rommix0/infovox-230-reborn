@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from .binfmt import INV, SLOTS, TABLES, IvxFormatError, align16, pack_words
-from .checks import Problem, check
+from .checks import Problem, check, errors
 from .model import MODULE_DIR, load
 from .rules import encode_module
 
@@ -75,13 +75,22 @@ def to_bytes(f):
     return bytes(header) + bytes(body)
 
 
+def _mode(path):
+    """the permission bits for a saved file: the existing file's, else 0666 less the umask"""
+    if path.exists():
+        return path.stat().st_mode & 0o777
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
+
+
 def save(f, path):
     """check f, then write it to path through a temporary file in the same folder; an
-    existing file is kept as <name>.bak"""
+    existing file is kept as <name>.bak. Warnings do not stop a save."""
     path = Path(path).resolve()
     if BIN in path.parents:
         raise PermissionError('%s is in bin/, which holds the shipped files' % path)
-    problems = check(f)
+    problems = errors(check(f))
     if problems:
         raise SaveRefused(problems)
     data = to_bytes(f)
@@ -95,6 +104,9 @@ def save(f, path):
     try:
         with os.fdopen(fd, 'wb') as out:
             out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        os.chmod(tmp, _mode(path))              # mkstemp makes the file 0600
         if path.exists():
             shutil.copy2(path, path.with_name(path.name + '.bak'))
         os.replace(tmp, path)

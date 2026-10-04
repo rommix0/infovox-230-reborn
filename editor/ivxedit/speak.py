@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .checks import check
+from .checks import check, errors
 from .writer import to_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -121,10 +121,15 @@ def speak_bytes(data, text, opts=None, exe=None):
     return Speech(out, samples, fs, events, other)
 
 
-def speak_model(f, text, opts=None, exe=None):
-    """speak `text` with the model f; refuses (SpeakError) when check(f) finds problems"""
-    problems = check(f)
+def model_bytes(f):
+    """the .ivx bytes to speak f with; SpeakError when check(f) finds errors"""
+    problems = errors(check(f))
     if problems:
         raise SpeakError('the file has %d problem(s): %s' % (
             len(problems), '; '.join(str(p) for p in problems[:3])))
-    return speak_bytes(to_bytes(f), text, opts, exe)
+    return to_bytes(f)
+
+
+def speak_model(f, text, opts=None, exe=None):
+    """speak `text` with the model f; refuses (SpeakError) when check(f) finds errors"""
+    return speak_bytes(model_bytes(f), text, opts, exe)

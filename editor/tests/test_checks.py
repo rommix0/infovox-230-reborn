@@ -1,8 +1,8 @@
 import unittest
 
-from ivxedit.checks import check
-from ivxedit.model import PNAMES, ParamItem, PhRef, Phoneme, load
-from ivxedit.rules import REPL, Instr, ph_positions
+from ivxedit.checks import check, errors
+from ivxedit.model import PNAMES, Lexicon, ParamItem, PhRef, Phoneme, VarItem, load
+from ivxedit.rules import REPL, Instr, Rule, ph_positions
 from tests.util import LANGS, ivx_bytes
 
 
@@ -71,10 +71,11 @@ class ChecksTest(unittest.TestCase):
     def test_inventory_size_limit(self):
         f = sw()
         size = lambda: 2 + sum(len(p.to_bytes()) for p in f.phonemes)
+        new = lambda: Phoneme(bytes([1 + len(f.phonemes) // 250, 1 + len(f.phonemes) % 250]), 0, 0, [])
         while size() + 12 <= 0x8000:
-            f.phonemes.append(Phoneme(b'', 0, 0, []))
+            f.phonemes.append(new())
         self.assertEqual(check(f), [])
-        f.phonemes.append(Phoneme(b'', 0, 0, []))
+        f.phonemes.append(new())
         self.assertIn('inventory', [p.where for p in check(f)])
 
     def test_required_modules(self):
@@ -99,6 +100,73 @@ class ChecksTest(unittest.TestCase):
         ins.args = []
         self.assertTrue(check(f))
 
+
+    def test_names(self):
+        f = sw()
+        a = next(p for p in f.phonemes if p.name == b'A:')
+        for bad in (b'\0\0', b'A\0', b'ABC', 'A:'):
+            a.name = bad
+            with self.subTest(name=bad):
+                self.assertEqual([(p.target, p.warning) for p in check(f)], [(('phoneme', a), False)])
+        e = next(p for p in f.phonemes if p.name == b'E:')
+        a.name = b'E:'                          # a duplicate: the warning is on the later one
+        probs = check(f)
+        self.assertEqual([(p.target, p.warning) for p in probs], [(('phoneme', e), True)])
+        self.assertIn("also phoneme %d's" % f.phonemes.index(a), probs[0].message)
+        self.assertEqual(errors(probs), [])
+    def test_build_tag(self):
+        f = sw()
+        f.head = b'XX' + f.head[2:]
+        self.assertEqual([p.target for p in check(f)], [('header',)])
+
+    def test_phoneme_id_past_0x7fff(self):
+        f = sw()
+        ins = f.modules['M0'].rules[0].instrs[0]                 # SEEK +
+        ins.args[0] = PhRef(ins.args[0].ph, 0x8000)
+        self.assertEqual([p.target for p in check(f)], [('rule', 'M0', 0)])
+        self.assertIn('signed 16-bit', check(f)[0].message)
+
+    def test_rule_length(self):
+        f = sw()
+        f.modules['M1'].rules[3].instrs += [Instr(0x10, [5])] * 0x3FFF
+        self.assertEqual([p.target for p in check(f)], [('rule', 'M1', 3)])
+
+    def test_operand_range(self):
+        f = sw()
+        f.modules['M2'].rules[0].instrs.append(Instr(0x10, [0x10000]))
+        self.assertEqual([p.message for p in check(f)], ['an operand does not fit 16 bits'])
+
+    def test_table_sizes(self):
+        for attr, value in (('class_lo', bytes(0x7F)), ('class_lo', bytearray(0x80)),
+                            ('xlat_hi', bytes(0x101)), ('class_hi', list(bytes(0x80)))):
+            f = sw()
+            setattr(f, attr, value)
+            with self.subTest(attr=attr, value=type(value)):
+                self.assertEqual([p.target for p in check(f)], [('chars',)])
+        f = sw()
+        f.tables[2] = f.tables[2][:31]
+        self.assertEqual([p.target for p in check(f)], [('params',)])
+        f = sw()
+        f.tables[1][5] = -1
+        self.assertEqual([p.target for p in check(f)], [('params',)])
+
+    def test_check_never_raises(self):
+        f = sw()
+        f.phonemes[1].name = None
+        f.phonemes[2].items.append('junk')
+        f.phonemes[3].items[0] = VarItem(0x90, 'x')
+        f.lexicon.entries[5] = ('A', 'B')
+        f.modules['M0'].rules[0].instrs.append(Instr(None, []))
+        probs = check(f)
+        self.assertEqual({p.target for p in probs if p.target[0] != 'rule'},
+                         {('phoneme', f.phonemes[k]) for k in (1, 2, 3)} | {('lexicon', 5)})
+
+    def test_targets(self):
+        f = sw()
+        f.lexicon.entries[1], f.lexicon.entries[2] = f.lexicon.entries[2], f.lexicon.entries[1]
+        del f.modules['M5']
+        f.phonemes.append(f.phonemes.pop(0))
+        self.assertEqual(sorted(p.target for p in check(f)), [('lexicon', 2), ('phonemes',), ('rules',)])
 
 if __name__ == '__main__':
     unittest.main()

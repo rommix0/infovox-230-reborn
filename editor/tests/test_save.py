@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,6 +52,26 @@ class SaveTest(unittest.TestCase):
             save(f, self.dir / 'x.ivx')
         self.assertEqual(list(self.dir.iterdir()), [])
 
+
+    def test_a_warning_does_not_stop_a_save(self):
+        f = load(ivx_bytes('sw'))
+        f.phonemes[2].name = f.phonemes[1].name
+        self.assertTrue(check(f) and all(p.warning for p in check(f)))
+        save(f, self.dir / 'x.ivx')
+        self.assertEqual((self.dir / 'x.ivx').read_bytes(), to_bytes(f))
+
+    @unittest.skipUnless(os.name == 'posix', 'permission bits are POSIX')
+    def test_saved_file_mode(self):
+        out = self.dir / 'sw.ivx'
+        umask = os.umask(0o022)
+        try:
+            save(load(ivx_bytes('sw')), out)
+            self.assertEqual(out.stat().st_mode & 0o777, 0o644)
+            out.chmod(0o640)
+            save(load(ivx_bytes('sw')), out)
+            self.assertEqual(out.stat().st_mode & 0o777, 0o640)
+        finally:
+            os.umask(umask)
 
 if __name__ == '__main__':
     unittest.main()
