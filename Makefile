@@ -29,6 +29,7 @@ RPATH   =
 AUDIO   = cli/audio_win.c
 AUDIOLIBS = -lwinmm
 PLAT    = win32
+PY      = python
 else
 B       = build/linux
 EXE     =
@@ -43,6 +44,7 @@ RPATH   = -Wl,-rpath,'$$ORIGIN'
 AUDIO   = cli/audio_alsa.c
 AUDIOLIBS = -lasound
 PLAT    = linux-i386
+PY      = python3
 endif
 LIBOBJ    = $(patsubst src/%.c,$(B)/lib/%.o,$(SRC)) $(B)/lib/infovox230.o $(B)/lib/ivxdict.o
 LIBCFLAGS = $(CFLAGS) $(PIC) -fvisibility=hidden -DIVX_BUILD -Iinclude
@@ -112,7 +114,7 @@ build/tts_cmp.exe: tests/tts_cmp.c tests/harness.c tests/harness.h $(patsubst sr
 	$(CC) $(CFLAGS) -Itests -DCW_COVERAGE $(filter %.c %.o,$^) -o $@ $(LDLIBS)
 
 ifeq ($(OS),Windows_NT)
-test: all
+test: all editor-test
 	build/synth_cmp.exe bin/Ivx230nt.dll
 	build/cw_cmp.exe bin
 	build/op_cmp.exe bin
@@ -121,10 +123,14 @@ test: all
 	build/api_test.exe bin
 	python tools/check_ivxsay.py
 else
-test: all
+test: all editor-test
 	$(B)/api_test bin
 	python3 tools/check_ivxsay.py $(B)/ivxsay
 endif
+
+# the .ivx editor's model and writer (editor/); the relocation test speaks through ivxsay
+editor-test: $(B)/ivxsay$(EXE)
+	IVXSAY=$(B)/ivxsay$(EXE) $(PY) -m unittest discover -s editor/tests -t editor
 
 # release folder and archive for this platform: dist/infovox230-<version>-<plat>/
 VERSION := $(shell v=$$(sed -n 's/^\#define IVX_VERSION \(0x[0-9a-fA-F]*\).*/\1/p' include/infovox230.h); \
@@ -159,4 +165,4 @@ clean:
 	      build/linux/libinfovox230.so.0
 	rm -rf dist
 
-.PHONY: all test clean dist
+.PHONY: all test clean dist editor-test
