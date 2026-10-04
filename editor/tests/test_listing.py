@@ -1,9 +1,10 @@
 import random
 import unittest
 
-from ivxedit.listing import MNEMONICS, ph_text, rule_line
+from ivxedit.listing import MNEMONICS, ParseError, parse_rule, ph_names, ph_text, rule_line, words
 from ivxedit.model import Phoneme, PhRef, load
 from ivxedit.rules import Instr, Rule, rep_split
+from tests.fuzz import edit, ph_ids, reads_back
 from tests.util import LANGS, ivx_bytes
 
 A = Phoneme(b'A:', 0, 0, [])
@@ -130,6 +131,78 @@ class ListingTest(unittest.TestCase):
             args = [rng.choice([rng.randrange(0x10000), PhRef(A), PhRef(None), -1, 0x12345])
                     for _ in range(rng.randrange(6))]
             rule_line(Rule(False, [Instr(rng.choice(ops), args)]))
+
+
+NAMES = ph_names([A, PLUS, SPACE, Phoneme(b'\0;', 0, 0, [])])
+
+
+def again(rule):
+    """rule -> its line -> the rule read back"""
+    return parse_rule(rule_line(rule).text, NAMES)
+
+
+class ParseTest(unittest.TestCase):
+    def test_every_shipped_rule_reads_back(self):
+        # spec: Testing, 5
+        n = 0
+        for lang in LANGS:
+            f = load(ivx_bytes(lang))
+            names = ph_names(f.phonemes)
+            for name, m in f.modules.items():
+                for i, r in enumerate(m.rules):
+                    n += 1
+                    with self.subTest(lang=lang, module=name, rule=i):
+                        self.assertEqual(words(parse_rule(rule_line(r).text, names)), words(r))
+        self.assertEqual(n, 15564)
+
+    def test_operand_kinds_read_back(self):
+        for ins in (Instr(0x40, [PhRef(A)]), Instr(0x4C, [PhRef(SPACE)]), Instr(0x4C, [PhRef(None)]),
+                    Instr(0x4C, [PhRef(A, 4)]), Instr(0x4C, [0x7000]), Instr(0xC4, [0x0010, 0, 0x0110, 0]),
+                    Instr(0xBC, [0x010C, PhRef(A)]), Instr(0xBC, [0x0314] + [PhRef(A)] * 23),
+                    Instr(0x150, [0xFFFB]), Instr(0x188, [3, 2]), Instr(0x100, [0x0005, 0x0000]),
+                    Instr(0x108, [0x4005, 0xFC80]), Instr(0x10C, [0x80AC]), Instr(0x100, [0x0005, 0x0203]),
+                    Instr(0x68, [0x8004, PhRef(PLUS)]), Instr(0x6C, [0x037C, 0x400A, 0x0001, 0, 0x0003, 0]),
+                    Instr(0x68, [0xA00A, PhRef(PLUS), 0xC018, 10, 0x0500]),
+                    Instr(0x68, [0x2006, 0x05C6, 0x0533]), Instr(0x68, [0xA004, PhRef(PLUS)]),
+                    Instr(0xBC, [0x0130, PhRef(A), PhRef(NAMES['⁏']), PhRef(PLUS), PhRef(SPACE)]),
+                    Instr(0xCC, []), Instr(0x10, [7])):
+            for iterative in (False, True):
+                rule = Rule(iterative, [ins, Instr(0x10, [32])])
+                with self.subTest(line=rule_line(rule).text):
+                    self.assertEqual(words(again(rule)), words(rule))
+
+    def test_refusals(self):
+        for text in ('', 'RULE ', 'RULE  SEEK A:', 'RULE SEEK A: ', 'RULE SEEK', 'RULE SEEK Q',
+                     'RULE SEEK A: A:', 'RULE NEXT', 'RULE NEXT #70000', 'RULE A= 70000', 'RULE ?1234',
+                     'RULE FROB', 'RULE REPL del 0 ->' + ' A:' * 64, 'RULE REPL del 300 -> A:', 'RULE REPL #0124 A:',
+                     'RULE LD F1', 'RULE LD v80@0', 'RULE LD F1@64', 'RULE LD Q1@0', 'RULE ST vac t=0',
+                     'RULE RP 300,0 { + }', 'RULE FOCUSP { #8004 }', 'RULE FOCUSP { <F1 ~ 5> }',
+                     'RULE SETF [0010/0110]', 'RULE A= +', 'RULE SEEK A:+x', 'RULE* ', 'rule SEEK +'):
+            with self.subTest(text=text):
+                with self.assertRaises(ParseError):
+                    parse_rule(text, NAMES)
+
+    def test_error_column(self):
+        with self.assertRaises(ParseError) as cm:
+            parse_rule('RULE SEEK A: ; R Q ; NEXT #1', NAMES)
+        self.assertEqual(cm.exception.pos, 17)
+        self.assertIn("no phoneme 'Q'", str(cm.exception))
+
+    def test_random_edits(self):
+        # spec: Testing, 7: an edited line gives a ParseError or a rule whose bytes read back
+        rng = random.Random(7)
+        for lang in LANGS:
+            f = load(ivx_bytes(lang))
+            names, ph_id = ph_names(f.phonemes), ph_ids(f)
+            rules = [r for m in f.modules.values() for r in m.rules]
+            for _ in range(400):
+                text = edit(rng, rule_line(rng.choice(rules)).text)
+                try:
+                    rule = parse_rule(text, names)
+                except ParseError:
+                    continue
+                with self.subTest(lang=lang, text=text):
+                    self.assertTrue(reads_back(rule, ph_id))
 
 
 if __name__ == '__main__':

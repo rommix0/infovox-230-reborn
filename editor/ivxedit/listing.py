@@ -2,7 +2,10 @@
 
 A line is 'RULE' or 'RULE*', then the rule's instructions, each a mnemonic and its
 operands, separated by ' ; '. Every operand word is in the text, so a line determines its
-rule's words; the parser that reads lines back comes with the rule notation (step 3).
+rule's words: parse_rule reads the line of any rule a file loads back into that rule. It
+refuses an instruction whose words would not decode as that instruction again (a wrong
+operand count, an unknown opcode, a phoneme where no id goes), which only hand-built
+rules have.
 Tokens are separated by single spaces (a parameter test <...> is one token with spaces
 inside its brackets), and an operand's kind follows from its position:
 
@@ -27,11 +30,14 @@ inside its brackets), and an operand's kind follows from its position:
 Each line comes with spans (start, end, kind, obj) for highlighting and jumps: kind is
 'op', 'ph' (obj = the PhRef), 'num', 'feat', 'param' or 'raw'.
 """
+import re
 from dataclasses import dataclass, field
 
+from .binfmt import pack_words
 from .info import item_name, ph_name, s8
 from .model import PhRef
-from .rules import FIXED, PH_OPS, REPL, REPL_NEXT, rep_split
+from .rules import (FIXED, PH_OPS, REPL, REPL_NEXT, Instr, Rule, encode_rule, operand_count,
+                    ph_positions, rep_split)
 
 MNEMONICS = {
     0x00: 'END', 0x04: 'BEGIN', 0x10: 'NEXT', 0x40: 'SEEK', 0x44: 'FOCUS', 0x48: 'SCAN',
@@ -247,3 +253,245 @@ def rule_line(rule):
         o.put(' ')
         _instr(o, ins)
     return o.line()
+
+
+# --- reading lines back
+
+class ParseError(ValueError):
+    """a line that does not read; pos is the column of the problem"""
+
+    def __init__(self, message, pos=0):
+        super().__init__('column %d: %s' % (pos + 1, message))
+        self.message, self.pos = message, pos
+
+
+OPCODES = {m: op for op, m in MNEMONICS.items()}
+CAPTURE_IDS = {r: op for op, r in CAPTURE.items()}
+COMPARE_IDS = {s: op for op, s in COMPARE.items()}
+ITEM_IDS = {item_name(i): i for i in range(0x100)}
+TEST = re.compile(r'<(?:#([0-9a-f]{4})|([^ <>.]+)(\.last)?(\.hi)? '
+                  r'(?:-> (\w+)|(<=|<|==|!=|>=|>) (-?[0-9]+)))>')
+FEAT = re.compile(r'\[([0-9a-f]{8})/([0-9a-f]{8})\]')
+RAW = re.compile(r'#([0-9a-f]{4})')
+LDST = re.compile(r'([^@ ]+)(?:@(?:#([0-9a-f]{4})|(-?[0-9]+)(\.hi)?))?')
+DEC = re.compile(r'-?[0-9]+')
+
+
+def ph_names(phonemes):
+    """{name as ph_text writes it: Phoneme}; of two phonemes with one name, the first (as
+    the engine's ph_find)"""
+    names = {}
+    for ph in phonemes:
+        names.setdefault(ph_text(PhRef(ph)), ph)
+    return names
+
+
+def u16(text, pos):
+    """a decimal operand -> its word; -32768..65535"""
+    v = int(text)
+    if not -0x8000 <= v <= 0xFFFF:
+        raise ParseError('%s does not fit in 16 bits' % text, pos)
+    return v & 0xFFFF
+
+
+def _tokens(text, pos):
+    """an instruction's text -> [(token, column)]: tokens are separated by single spaces,
+    and a parameter test <...> is one token"""
+    out, i = [], 0
+    while i < len(text):
+        m = TEST.match(text, i) if text[i] == '<' else None
+        j = m.end() if m else (text.find(' ', i) if ' ' in text[i:] else len(text))
+        if j == i:
+            raise ParseError('two spaces in a row', pos + i)
+        out.append((text[i:j], pos + i))
+        if j < len(text) and (text[j] != ' ' or j + 1 == len(text)):
+            raise ParseError('expected one space', pos + j)
+        i = j + 1
+    return out
+
+
+def phoneme(tok, pos, names):
+    """a phoneme operand: NAME, NAME+d, <end>, or #hhhh (an id outside the inventory)"""
+    if RAW.fullmatch(tok):
+        return int(tok[1:], 16)
+    if tok == '<end>':
+        return PhRef(None)
+    if tok in names:
+        return PhRef(names[tok])
+    for k in (2, 1):
+        if tok[k:k + 1] == '+' and tok[:k] in names and re.fullmatch('[0-9]+', tok[k + 1:]):
+            return PhRef(names[tok[:k]], int(tok[k + 1:]))
+    raise ParseError('no phoneme %r' % tok, pos)
+
+
+def feat_words(tok, pos):
+    """[vvvvvvvv/mmmmmmmm] -> 4 words"""
+    m = FEAT.fullmatch(tok)
+    if not m:
+        raise ParseError('expected [vvvvvvvv/mmmmmmmm]', pos)
+    v, mk = int(m.group(1), 16), int(m.group(2), 16)
+    return [v >> 16, v & 0xFFFF, mk >> 16, mk & 0xFFFF]
+
+
+def test_words(tok, pos):
+    """a parameter test <...> -> its words"""
+    m = TEST.fullmatch(tok)
+    if m is None:
+        raise ParseError('expected a parameter test <...>', pos)
+    if m.group(1):
+        return [int(m.group(1), 16)]
+    name, last, hi, reg, cmp, k = m.group(2, 3, 4, 5, 6, 7)
+    if name not in ITEM_IDS:
+        raise ParseError('no parameter or variable %r' % name, pos)
+    w = ITEM_IDS[name] << 8 | (0x80 if last else 0) | (0x40 if hi else 0)
+    if reg is not None:
+        if reg not in CAPTURE_IDS:
+            raise ParseError('no register %r' % reg, pos)
+        return [w | CAPTURE_IDS[reg]]
+    return [w | COMPARE_IDS[cmp], u16(k, pos)]
+
+
+def _read_pattern(toks, names):
+    """the tokens between { and } -> the pattern's words, header first"""
+    if toks and RAW.fullmatch(toks[0][0]):
+        return [phoneme(t, p, names) for t, p in toks]
+    ws, h, k = [], 0, 0
+    if k < len(toks) and not FEAT.fullmatch(toks[k][0]) and not TEST.fullmatch(toks[k][0]):
+        ws.append(phoneme(*toks[k], names))
+        h |= 0x8000
+        k += 1
+    if k < len(toks) and FEAT.fullmatch(toks[k][0]):
+        ws += feat_words(*toks[k])
+        h |= 0x4000
+        k += 1
+    if k < len(toks):
+        h |= 0x2000
+        for t, p in toks[k:]:
+            ws += test_words(t, p)
+    if len(ws) + 1 > 0x7FF:
+        raise ParseError('the pattern is too long', toks[0][1])
+    return [h | 2 * (len(ws) + 1)] + ws
+
+
+def ldst_words(toks):
+    """LD/ST operands (F1@k[.hi], F1@#hhhh or vXX, then t=N) -> [spec] or [spec, index]"""
+    tok, p = toks[0]
+    m = LDST.fullmatch(tok)
+    if not m or m.group(1) not in ITEM_IDS or len(toks) > 2:
+        raise ParseError('expected F1@k or vXX', p)
+    iid, t = ITEM_IDS[m.group(1)], 0
+    if len(toks) == 2:
+        tt, tp = toks[1]
+        if not (tt.startswith('t=') and DEC.fullmatch(tt[2:]) and -128 <= int(tt[2:]) <= 127
+                and int(tt[2:])):
+            raise ParseError('expected t=N with N in -128..127, not 0', tp)
+        t = int(tt[2:]) & 0xFF
+    spec = t << 8 | iid
+    if iid >= 0x80:
+        if m.group(2) or m.group(3):
+            raise ParseError('a variable has no index', p)
+        return [spec]
+    if m.group(2):
+        return [spec, int(m.group(2), 16)]
+    if m.group(3) is None:
+        raise ParseError('a parameter needs an index @k', p)
+    k = int(m.group(3))
+    if not -64 <= k <= 63:
+        raise ParseError('the index %d is not in -64..63' % k, p)
+    return [spec, (2 * k & 0xFF) << 8 | (0x80 if m.group(4) else 0)]
+
+
+def _shaped_args(op, toks, names):
+    """op's operands from toks in its shaped form, or None if toks are not in that form"""
+    t = [x for x, _ in toks]
+    if op in PH_OPS:
+        return [phoneme(*toks[0], names)] if len(t) == 1 else None
+    if op in FEAT_OPS:
+        return feat_words(*toks[0]) if len(t) == 1 and FEAT.fullmatch(t[0]) else None
+    if op == 0x68:
+        return _read_pattern(toks[1:-1], names) if len(t) >= 2 and t[0] == '{' and t[-1] == '}' else None
+    if op in (0x6C, 0x9C):
+        m = re.fullmatch(r'([0-9]+),([0-9]+)', t[0]) if t else None
+        if not (m and len(t) >= 3 and t[1] == '{' and t[-1] == '}'):
+            return None
+        lo, hi = int(m.group(1)), int(m.group(2))
+        if lo > 255 or hi > 255:
+            raise ParseError('a count is more than 255', toks[0][1])
+        return [lo << 8 | hi] + _read_pattern(toks[2:-1], names)
+    if op in (REPL, REPL_NEXT):
+        if not (len(t) >= 3 and t[0] == 'del' and re.fullmatch('[0-9]+', t[1]) and t[2] == '->'):
+            return None
+        d, ids = int(t[1]), [phoneme(x, p, names) for x, p in toks[3:]]
+        w = d * 256 + 12 * len(ids)
+        if w > 0xFFFF or rep_split(w) != (d, len(ids)):
+            raise ParseError('del %d with %d phonemes does not fit a REPL word' % (d, len(ids)),
+                             toks[1][1])
+        return [w] + ids
+    if op in LDST_OPS:
+        return ldst_words(toks) if t and not RAW.fullmatch(t[0]) else None
+    if op == 0x188:
+        m = re.fullmatch(r'(-?[0-9]+)/2\^(-?[0-9]+)', t[0]) if len(t) == 1 else None
+        return [u16(m.group(1), toks[0][1]), u16(m.group(2), toks[0][1])] if m else None
+    if op in (0x10, 0xC8):
+        m = re.fullmatch(r'#([0-9]+)', t[0]) if len(t) == 1 else None
+        return [u16(m.group(1), toks[0][1])] if m else None
+    if op in FIXED and len(t) == FIXED[op] and all(DEC.fullmatch(x) for x in t):
+        return [u16(x, p) for x, p in toks]
+    return None
+
+
+def _read_instr(text, pos, names):
+    toks = _tokens(text, pos)
+    if not toks:
+        raise ParseError('expected an instruction', pos)
+    (m, mp), rest = toks[0], toks[1:]
+    if m not in OPCODES:
+        raise ParseError('no instruction %r' % m, mp)
+    op = OPCODES[m]
+    args = _shaped_args(op, rest, names)
+    if args is None:
+        args = [phoneme(x, p, names) for x, p in rest]
+    ins = Instr(op, args)
+    check_shape(ins, mp)
+    return ins
+
+
+def check_shape(ins, pos):
+    """refuse an instruction whose words would not read back as this instruction: the
+    operand count its opcode and operands give, and phonemes only where ids go"""
+    ws = [a if isinstance(a, int) else 0 for a in ins.args]
+    n = operand_count(pack_words([ins.op] + ws + [0, 0]), 0)
+    if n != len(ws):
+        raise ParseError('%s has %d operand words here, not %d' % (MNEMONICS[ins.op], n, len(ws)), pos)
+    try:
+        ids = set(ph_positions(ins))
+    except IndexError:
+        ids = set()
+    if any(isinstance(a, PhRef) and k not in ids for k, a in enumerate(ins.args)):
+        raise ParseError('a phoneme where %s has no phoneme id' % MNEMONICS[ins.op], pos)
+
+
+def words(rule):
+    """the rule's words, each phoneme reference as (id of its Phoneme, delta): two rules with
+    equal words are the same rule"""
+    return encode_rule(rule, lambda ref: (id(ref.ph), ref.delta))
+
+
+def check_length(rule):
+    """refuse a rule longer than its length word holds"""
+    if 2 + 2 * sum(1 + len(i.args) for i in rule.instrs) > 0xFFFF:
+        raise ParseError('the rule is longer than 65535 bytes')
+    return rule
+
+
+def parse_rule(text, names):
+    """a line in instruction form -> Rule; names from ph_names(); raises ParseError"""
+    head, sep, body = text.partition(' ')
+    if head not in ('RULE', 'RULE*'):
+        raise ParseError('a line starts with RULE or RULE*', 0)
+    instrs, pos = [], len(head) + 1
+    if sep:
+        for part in body.split(' ; '):
+            instrs.append(_read_instr(part, pos, names))
+            pos += len(part) + 3
+    return check_length(Rule(head == 'RULE*', instrs))
