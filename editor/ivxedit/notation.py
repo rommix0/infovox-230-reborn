@@ -365,16 +365,18 @@ _LEX = re.compile(r'''
   | (?P<space>␠)
   | (?P<any>·)
   | (?P<bundle>\[[^\]]*\])
-  | (?P<test><[^\s<>.]+(?:\.last)?(?:\.hi)?\ (?:→\ \w+|[<≤=≠≥>]\ -?[0-9]+)>)
+  | (?P<test><[^\s<>.]+(?:\.last)?(?:\.hi)?\ (?:(?:→|->)\ \w+|(?:<=|>=|!=|==|[<≤=≠≥>])\ -?[0-9]+)>)
   | (?P<rep>\{[0-9]+(?:,[0-9]+)?\}|\*)
   | (?P<block>\{[^{}]*\})
-  | (?P<arrow>→⁺|→)
+  | (?P<arrow>→⁺|→|->\+|->)
   | (?P<once>once(?!\S))
-  | (?P<sym>[()∅↺/_…^⟵;])
+  | (?P<sym>[()∅↺/_…^⟵;]|\.\.\.(?!\S)|<-(?!\S))
   | (?P<name>[%s]+)
 ''' % SAFE, re.X)
 _HEAD = re.compile(r'\*?#[0-9]+(?!\S)|\*(?!\S)')
-_NTEST = re.compile(r'<([^\s<>.]+)(\.last)?(\.hi)? (?:→ (\w+)|([<≤=≠≥>]) (-?[0-9]+))>')
+_NTEST = re.compile(r'<([^\s<>.]+)(\.last)?(\.hi)? (?:(?:→|->) (\w+)|(<=|>=|!=|==|[<≤=≠≥>]) (-?[0-9]+))>')
+# what may be typed for a symbol (NOTATION.md, Typing); the editor writes the symbol
+ALIASES = {'->': '→', '->+': '→⁺', '...': '…', '<-': '⟵', '<=': '≤', '>=': '≥', '!=': '≠', '==': '='}
 ATOM = ('name', 'esc', 'space', 'any', 'bundle', 'test')
 
 
@@ -399,7 +401,10 @@ def lex(text):
         if m.lastgroup == 'ws':
             gap = True
         else:
-            out.append(Tok(m.lastgroup, m.group(), i, not gap))
+            t = m.group()
+            if m.lastgroup in ('arrow', 'sym'):      # not names: '==' may be a phoneme's
+                t = ALIASES.get(t, t)
+            out.append(Tok(m.lastgroup, t, i, not gap))
             gap = False
         i = m.end()
     return out
@@ -495,7 +500,7 @@ def read_bundle(t):
         return v, mk
     v = mk = 0
     for part in body.split(' ') if body else []:
-        m = re.fullmatch(r'([+−])b([0-9]+)', part)
+        m = re.fullmatch(r'([+−-])b([0-9]+)', part)
         bit = dec(m.group(2), t.pos) if m else 99
         if bit > 31 or mk >> bit & 1:
             raise ParseError('expected +bN or −bN, N in 0..31, each bit once', t.pos)
@@ -513,7 +518,7 @@ def read_test(t):
         if reg not in CAPTURE_IDS:
             raise ParseError('no register %r' % reg, t.pos)
         return [w | CAPTURE_IDS[reg]]
-    return [w | COMPARE_IDS[cmp], u16(k, t.pos)]
+    return [w | COMPARE_IDS[ALIASES.get(cmp, cmp)], u16(k, t.pos)]
 
 
 def read_rep(t):

@@ -258,10 +258,11 @@ def rule_line(rule):
 # --- reading lines back
 
 class ParseError(ValueError):
-    """a line that does not read; pos is the column of the problem"""
+    """a line that does not read; pos is the column of the problem, or None when the
+    problem is the rule as a whole"""
 
-    def __init__(self, message, pos=0):
-        super().__init__('column %d: %s' % (pos + 1, message))
+    def __init__(self, message, pos=None):
+        super().__init__(message if pos is None else 'column %d: %s' % (pos + 1, message))
         self.message, self.pos = message, pos
 
 
@@ -507,7 +508,7 @@ def check_length(rule, poss=None):
         ws += [ins.op] + [a if isinstance(a, int) else 0 for a in ins.args]
     data = pack_words(ws + [0, 0])
     for i, (ins, k) in enumerate(zip(rule.instrs, starts)):
-        name, pos = MNEMONICS[ins.op], poss[i] if poss else 0
+        name, pos = MNEMONICS[ins.op], poss[i] if poss else None
         if k + COUNT_WORD.get(ins.op, 0) >= len(ws):
             raise ParseError('%s lacks the word that gives its operand count' % name, pos)
         n = operand_count(data, 2 * k)

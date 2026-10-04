@@ -95,13 +95,14 @@ order. A second or later group always has `→⁺`: it acts on the segments afte
 the group before it left. A group with no phonemes and no `∅` has one element on its
 left-hand side. `REPL` inserts at most 21 phonemes and deletes at most 255 segments.
 
-A bundle or a statement acts on the focus as it is at that point, and only `REPL` moves it
-to a new place:
+A bundle or a statement acts on the focus as it is at that point. `SETF` and statements do
+not move the focus; `REPL`, `REPL+` and `SETF+` do:
 - after a `REPL` that inserts phonemes, the focus is the last inserted segment: in
   `W iy → D ah B Y [−b0]` the bundle clears `b0` on `Y` only (the same for statements);
 - after a `REPL` that inserts nothing (`→ ∅`), it is the segment before the deleted ones;
-- `SETF` does not move the focus. `SETF+` and `REPL+` first move it one segment right, and
-  what follows acts there.
+- `SETF+` moves the focus one segment right and sets its bits there; `REPL+` moves it one
+  segment right and then replaces from there, leaving the focus as `REPL` does (the two
+  points above).
 
 Statements, in `{ }` and separated by `;`, work on the focus segment's items and the
 accumulator (on the focus as the list above leaves it):
@@ -126,8 +127,11 @@ of the spec word.
   the right.
 - A search (the first element, `…`) moves the start position to the segment it finds. If
   the rest of the match fails, the rule resumes after that segment.
-- `(X)` is optional, but at the end of the segment list it fails, as a required element
-  does: the rule gives up there.
+- The ends of the segment list differ. On the right, an element that would read past the
+  last segment, `(X)` included, fails the rule: it gives up there (a `RULE*` that has
+  changed something starts again from the first segment). Before `⟵`, an element that
+  would read before the first segment, `(X)` included, fails only this start position: the
+  rule is tried at the next one.
 - `:=s` and `:=u` clamp the accumulator itself (to −127…127 and 0…255) before storing it, so
   `A` has the clamped value afterwards.
 - `once`: the rule has no `NEXT`. At its last instruction the interpreter goes on to the next
@@ -146,6 +150,27 @@ For example, these give the same words, and the editor writes the first:
 - `‹A›` and `A`, `‹ ›` and `␠` (a plain name in quotes);
 - `F1@#0000` and `F1@0`, `F1@#0080` and `F1@0.hi` (an index word that has a plain spelling);
 - spacing: `( A)` and `(A)`.
+
+## Typing
+
+The reader also takes ASCII for the symbols that have one; the editor writes the symbols:
+
+| Symbol | Typed |
+|---|---|
+| `→`, `→⁺` | `->`, `->+` |
+| `…` | `...` |
+| `⟵` | `<-` |
+| `−` in a bundle | `-`: `[+b20 -b24]` |
+| `≤` `≥` `≠` `=` in a test | `<=` `>=` `!=` `==` |
+| `→` in a capture | `->`: `<F1 -> R1>` |
+
+`...` and `<-` stand alone, with a space after them. `->+` is always `→⁺`: when the first
+phoneme on the right is `+`, write `-> +`. Phoneme names are never read as these spellings:
+`==` and `!=` are names where a name goes. The other symbols (`∅`, `↺`, `·`, `␠`, `‹ ›`)
+have no ASCII spelling; the rule editor's context menu inserts them.
+
+A line that starts with `RULE` or `RULE*` is read as instruction form, any other line as
+notation.
 
 ## Examples
 

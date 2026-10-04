@@ -132,6 +132,35 @@ class ExamplesTest(unittest.TestCase):
                 with self.assertRaises(ParseError):
                     parse_notation(text, NAMES)
 
+    def test_typed_spellings(self):
+        # NOTATION.md, Typing: ASCII for the symbols; the editor writes the symbols
+        for typed, written in (('#1 A -> S / B _ (B)', '#1 A → S / B _ (B)'),
+                               ('#7 B ->+ S / A _', '#7 B →⁺ S / A _'),
+                               ('#1 A -> S / ^ _ (B) ... ‹*›', '#1 A → S / ^ _ (B) … ‹*›'),
+                               ('#1 A -> [+b1 -b2]', '#1 A → [+b1 −b2]'),
+                               ('#818 ∅ -> # / [+b16]{3} <- _ A B', '#818 ∅ → # / [+b16]{3} ⟵ _ A B'),
+                               ('#1 A<F1 >= 50> -> S / ^ _', '#1 A<F1 ≥ 50> → S / ^ _'),
+                               ('#1 A<F1 <= 5> -> S / ^ _', '#1 A<F1 ≤ 5> → S / ^ _'),
+                               ('#1 A<F1 != 5> -> S / ^ _', '#1 A<F1 ≠ 5> → S / ^ _'),
+                               ('#1 A<F1 == 5> -> S / ^ _', '#1 A<F1 = 5> → S / ^ _'),
+                               ('#1 A<F1 -> R1> -> S / ^ _', '#1 A<F1 → R1> → S / ^ _')):
+            with self.subTest(typed=typed):
+                self.assertEqual(notation_line(parse_notation(typed, NAMES), NAMES).text, written)
+
+    def test_names_are_not_typed_symbols(self):
+        # '==', '!=' and '-' can be phoneme names: only symbols have typed spellings
+        ph = [Phoneme(n.encode().rjust(2, b'\0'), 0, 0, []) for n in ('A', '==', '!=', '-', '.')]
+        names = ph_names(ph)
+        for text in ('#1 == → - / . _ !=', '#1 - → == / _ . .'):
+            with self.subTest(text=text):
+                self.assertEqual(notation_line(parse_notation(text, names), names).text, text)
+
+    def test_errors_of_the_whole_rule_have_no_column(self):
+        with self.assertRaises(ParseError) as cm:
+            parse_notation('#1 ∅ → S', NAMES)
+        self.assertIsNone(cm.exception.pos)
+        self.assertEqual(str(cm.exception), 'no focus: ∅ on the left needs right context')
+
 
 class ShippedTest(unittest.TestCase):
     def test_coverage(self):
@@ -191,6 +220,35 @@ class ShippedTest(unittest.TestCase):
                     continue
                 with self.subTest(lang=lang, text=text):
                     self.assertTrue(reads_back(rule, ph_id))
+
+    def test_changed_rules(self):
+        # shipped rules with an instruction dropped, repeated or swapped, or an operand word
+        # changed: notation_line never raises, and a line it gives reads back to the rule
+        rng = random.Random(5)
+        for lang in LANGS:
+            f = load(ivx_bytes(lang))
+            names = ph_names(f.phonemes)
+            rules = [x for m in f.modules.values() for x in m.rules]
+            for _ in range(300):
+                rule = rng.choice(rules)
+                instrs = [Instr(i.op, list(i.args)) for i in rule.instrs]
+                k, c = rng.randrange(len(instrs)), rng.random()
+                if c < 0.25 and len(instrs) > 1:
+                    del instrs[k]
+                elif c < 0.5:
+                    instrs.insert(rng.randrange(len(instrs) + 1), instrs[k])
+                elif c < 0.75:
+                    j = rng.randrange(len(instrs))
+                    instrs[k], instrs[j] = instrs[j], instrs[k]
+                else:
+                    ints = [n for n, a in enumerate(instrs[k].args) if isinstance(a, int)]
+                    if ints:
+                        instrs[k].args[rng.choice(ints)] = rng.randrange(0x10000)
+                new = Rule(rule.iterative, instrs)
+                line = notation_line(new, names)
+                if line is not None:
+                    with self.subTest(lang=lang, text=line.text):
+                        self.assertEqual(words(parse_notation(line.text, names)), words(new))
 
 
 @unittest.skipIf(SAY is None, 'ivxsay is not built: run make (or set IVXSAY)')
