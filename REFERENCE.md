@@ -710,6 +710,7 @@ All multi-byte values are **big-endian**, which suggests the files were compiled
   - in files without a lexicon (H[3] = 0), the 128-word lexicon index at H[13] + 0x80
 - Character tables and the lexicon stay as bytes.
 - `tts_ctrl` cmd 3 (`0x1001ab40`) then binds the sections into the core struct (the `core+` offsets in §5.2).
+- **What an edited file must satisfy to load** [CONFIRMED, port source and `ivxsay` probes during the ivxedit step-1 review]: phoneme ids are signed shorts (`Seg.ph`), so the inventory including its terminator is at most 0x8000 bytes; M0, M1, M2 and M5 must exist (bound unconditionally, `src/ttsctrl.c:501-503`, or swapped up to the next section, `src/ttsctrl.c:389-398`) and M3 needs M4; an edited REPL word's low byte must be exactly 12·n (`cw_op_REPL`, `src/cwelem.c`); a build tag starting "XX" is refused by `ivx_bind` (`src/ttsctrl.c:472`). `editor/ivxedit/checks.py` enforces the first three.
 
 ### 5.2 File layout
 

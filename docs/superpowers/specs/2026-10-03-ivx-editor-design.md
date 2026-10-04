@@ -57,6 +57,8 @@ editor/
 
 ## Model (`model.py`)
 
+**As built in step 1** (plan `docs/superpowers/plans/2026-10-03-ivxedit-step1-model-writer.md`): the model keeps raw words where the list below describes typed fields — `tables` (4 × 32 words, with the `param(i)` accessor), `directory`, `header` (with `version`), `head`, the character tables as `bytes`, `ixlex` as bytes, `Module.end` as words, and `Instr.args` as flat operand words with `PhRef`s at the phoneme positions. The typed views below (feature pairs, patterns, LD/ST specs, REPL del/ids, parameter entries) are accessors to add over those words in the steps that edit them; edits go through them so `check()` stays meaningful.
+
 - **`IvxFile`**
   - `header`: flags, version string (0x80), copyright string (0xC0), lexicon name (0x10), the dword at 0x1C, and the rest of the 0x200 bytes as raw bytes.
   - `head`: body 0x40..0x70 (build tag, then the words at 0x6A, 0x6C, 0x6E), copied as found.
@@ -95,12 +97,15 @@ Each section starts at the alignment step 1 confirms (16 bytes expected), padded
 **Phoneme ids, two passes.** Pass 1 lays out the inventory and gives each `Phoneme` its new offset. Pass 2 encodes the modules; every `PhRef` is written as `offset(phoneme) + delta`. Ids are written from typed operands (`SEEK`/`FOCUS`/`SCAN`/`R`/`R?`/`L`/`L?`, `REPL`/`REPL+` id lists, pattern headers with bit 15), so no location can be missed.
 
 **Checks before saving.** Any failure writes nothing and reports the location (section, rule, phoneme):
-- the inventory fits in 16-bit ids, and each rule's length fits its length word;
-- each `REPL` word encodes as `d·256 + 12·n` without carry, unless it is an unedited raw word from the original file (the Danish M5 case);
+- the inventory, including its terminator, is at most 0x8000 bytes (phoneme ids are signed shorts), and each rule's length fits its length word;
+- each `REPL` word's low byte is exactly 12·n for its n ids (so at most 21), unless it is an unedited carrying word from the original file (the five shipped ones);
+- M0, M1, M2 and M5 exist, and M3 only with M4;
 - every `PhRef` points at a phoneme in the model; deleting a phoneme that rules use is refused, with the list of rules;
 - lexicon entries are in the order `lex_lookup` binary-searches (REFERENCE §5.5.1);
 - parameter times and values fit s8/u8, variables s16, class codes and transliterations their bytes;
 - the target path is not inside `bin/`.
+
+`save()` also re-loads the bytes it is about to write and refuses if they do not load and re-encode identically.
 
 **Saving.** Save As writes a temporary file in the target folder and renames it over the target; overwriting an existing file first keeps `<name>.bak`. Speak writes to a temporary file in the system temp folder.
 
@@ -183,7 +188,7 @@ Editing is enabled per editor in step 4 (all but Rules) and step 5 (Rules). Ever
 
 ## Testing
 
-`unittest`, run by `python -m unittest discover editor/tests`; a new `make editor-test` target, also run by `make test`. Tests that need `build/ivxsay.exe` or PySide6 skip with a message when they are missing.
+`unittest`, run by `python -m unittest discover -s editor/tests -t editor`; a new `make editor-test` target, also run by `make test`. Tests that need `build/ivxsay.exe` or PySide6 skip with a message when they are missing.
 
 Model and writer (step 1):
 1. **Round trip**: all 12 files read and written without edits are byte-identical to the originals.
