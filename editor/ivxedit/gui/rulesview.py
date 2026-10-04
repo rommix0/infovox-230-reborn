@@ -51,6 +51,8 @@ class RulesView(QPlainTextEdit):
 
     def ref_at(self, rule, col):
         """the PhRef at column `col` of rule line `rule`, or None"""
+        if not 0 <= rule < len(self.lines):
+            return None
         col -= len(PREFIX % rule)
         for s, e, kind, obj in self.lines[rule].spans:
             if kind == 'ph' and s <= col < e:
@@ -58,6 +60,8 @@ class RulesView(QPlainTextEdit):
         return None
 
     def goto_rule(self, i):
+        if not 0 <= i < len(self.lines):
+            return
         cur = QTextCursor(self.document().findBlockByNumber(i))
         self.setTextCursor(cur)
         self.centerCursor()
