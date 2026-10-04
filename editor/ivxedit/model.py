@@ -235,5 +235,5 @@ def load(data):
         return _load(data)
     except IvxFormatError:
         raise
-    except (IndexError, ValueError, struct.error) as e:
+    except (IndexError, KeyError, ValueError, OverflowError, RecursionError, struct.error) as e:
         raise IvxFormatError('cannot read the file: %s' % e) from e
