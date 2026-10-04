@@ -280,8 +280,10 @@ so all differential tests are unchanged (`make test`: 0 failures, `ivxsay` 12/12
   token writes into the Core fields before it (seen writing `mod[2]` and `out.tail.prev`, random bytes in
   `am`, `du` and `sp`). The port reads from the start of what was kept.
 - **REPL count** (`cw_op_REPL`, `src/cwelem.c`): the REPL word is `del·256 + 12·n`, and 12·n carries into
-  the high byte for 22 or more phonemes. `darules.ivx` M5 has two such rules, the names of the quotation
-  marks (`" 1` → *venstre anførselstegn*, `" 2` → *højre anførselstegn*, 23 phonemes, word 0x314). The DLL
+  the high byte for 22 or more phonemes. `darules.ivx` M5 has four such rules (words 0x32c, 0x314, 0x32c, 0x320; rules 20, 21, 48, 49)
+  and `icrules.ivx` M5 one (0x1108) [CONFIRMED, `editor/tests/test_rules.py`]. Rules 20 and 21 name the
+  quotation marks (`" 1` → *venstre anførselstegn*, 25 phonemes; `" 2` → *højre anførselstegn*, 23 phonemes,
+  word 0x314) [LIKELY: the lengths match]; what rules 48 and 49 name is not checked. The DLL
   takes the low byte as the count, so it runs 20 → 8 → 65532…, reads the bytecode after the rule as phoneme
   ids and crashes on their records at `0x10021942` (Danish phonetic input `"2` in text mode 12, 3 of 3 runs).
   Where the reads survive, it fills the pool, and `ctl_word_end`'s out-of-nodes restart fails the same way
@@ -1090,7 +1092,7 @@ Opcodes are words that are multiples of 4. `op` below = operand size in bytes.
 | 1C8/1CC | B=V / V=A | n | global variables (unchecked index; not used by any rule file) |
 | 1F0–1F8 | – | (1 word) | `0x10022ca0` skips one operand word. Not used by any rule file. |
 
-**Phoneme ids that point at the inventory's terminator** [CONFIRMED]: 1 operand in `frrules.ivx` (0x1bae) and 7 in `itrules.ivx` (0xe3c) equal the offset of the inventory's 0 terminator, so they name a phoneme that does not exist (no segment can match it). Probably a rule-compiler artifact for an undefined symbol [HYPOTHESIS]. Every other phoneme-id operand in the 12 files is a record start. The rule bytecode is the only place a file stores phoneme offsets: at run time every segment's id comes from `ph_find` (by name, `src/tpelem.c:274`) or from a rule operand [CONFIRMED, every `phinv` use in `src/`].
+**Phoneme ids that point at the inventory's terminator** [CONFIRMED]: 1 operand in `frrules.ivx` (0x1bae) and 7 in `itrules.ivx` (0xe3c) equal the offset of the inventory's 0 terminator, so they name a phoneme that does not exist (no segment can match it). Probably a rule-compiler artifact for an undefined symbol [HYPOTHESIS]. Every other phoneme-id operand in the 12 files is a record start. The rule bytecode is the only place a file stores phoneme offsets: at run time every segment's id comes from `ph_find` (by name, `src/tpelem.c:284`; the segment's id is set from its result at `:274`) or from a rule operand [CONFIRMED, every `phinv` use in `src/`].
 
 Status codes (`Core.status`): 0x10 bad opcode, 0x20 LD without item or default, 0x21 LD of an empty item, 0x22/0x23 invalid ST delete, 0x30–0x33 divide by zero, **0x40 out of pool nodes**, 0x50 bad parameter-test op, 0x60 UNWRAP 0, 0x90 end of module (returned as 0) [CONFIRMED].
 
