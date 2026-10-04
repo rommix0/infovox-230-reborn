@@ -1,12 +1,11 @@
 """Voice-data edits (spec: GUI, step 4): each edit changes what it says, undo restores the
 bytes exactly, and the edited file saves and loads again."""
-import struct
 import unittest
 
 from ivxedit import edits
 from ivxedit.checks import check, errors
 from ivxedit.edits import EditError
-from ivxedit.info import header_fields
+from ivxedit.info import a1_text, header_fields
 from ivxedit.model import PNAMES, ParamItem, VarItem, load
 from ivxedit.writer import to_bytes
 from ivxedit.xref import phoneme_uses
@@ -112,8 +111,12 @@ class EditTest(unittest.TestCase):
                                    ('A3', '-5', -5), ('A3', '0x10', 16)):
             edits.set_param(f, i, column, text).apply()
             self.assertEqual(f.param(i)[1 + edits.PARAM_COLUMNS.index(column)], want)
+        edits.set_param(f, i, 'A1', '0x10').apply()             # hex 16 is a valid type, stored as 16 * 4
+        self.assertEqual(f.param(i)[1], 64)
+        g = sw()
+        self.assertIsNone(edits.set_param(g, i, 'A1', a1_text(g.param(i)[1])))   # the displayed form
         for column, text in (('A1', '33'), ('A1', 'x'), ('A2', '256'), ('A2', '-1'), ('A3', '40000'),
-                             ('A3', '²')):
+                             ('A3', '²'), ('A1', '0x48'), ('A1', '7.5'), ('A1', '1x')):
             with self.subTest(column=column, text=text), self.assertRaises(EditError):
                 edits.set_param(f, i, column, text)
 

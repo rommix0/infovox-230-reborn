@@ -89,7 +89,7 @@ def set_param(f, i, column, text):
     (signed offset) of parameter i"""
     k = 1 + PARAM_COLUMNS.index(column)
     if column == 'A1':
-        m = re.match(r'\s*([0-9]{1,3})', text)
+        m = re.match(r'\s*([0-9]{1,3})\s*(:.*)?$', text)      # 'N' or 'N: handler name'
         v = number(m.group(1) if m else text, 0, A1_TYPES - 1, 'A1 type') * 4
     elif column == 'A2':
         v = number(text, 0, 255, 'A2 rate')

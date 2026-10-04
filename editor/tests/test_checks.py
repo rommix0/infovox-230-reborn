@@ -1,8 +1,8 @@
 import unittest
 
 from ivxedit.checks import check, errors
-from ivxedit.model import PNAMES, Lexicon, ParamItem, PhRef, Phoneme, VarItem, load
-from ivxedit.rules import REPL, Instr, Rule, ph_positions
+from ivxedit.model import PNAMES, ParamItem, PhRef, Phoneme, VarItem, load
+from ivxedit.rules import REPL, Instr
 from tests.util import LANGS, ivx_bytes
 
 
@@ -114,6 +114,10 @@ class ChecksTest(unittest.TestCase):
         self.assertEqual([(p.target, p.warning) for p in probs], [(('phoneme', e), True)])
         self.assertIn("also phoneme %d's" % f.phonemes.index(a), probs[0].message)
         self.assertEqual(errors(probs), [])
+        a.name = b'\0@'                         # the defaults record's name
+        probs = check(f)
+        self.assertEqual([(p.target, p.warning) for p in probs], [(('phoneme', a), True)])
+        self.assertIn("also phoneme 0's", probs[0].message)
 
     def test_build_tag(self):
         f = sw()

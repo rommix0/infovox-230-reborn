@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QUndoCommand, QUndoStack
-from PySide6.QtWidgets import (QDockWidget, QFileDialog, QInputDialog, QLabel, QListWidget,
+from PySide6.QtWidgets import (QApplication, QDockWidget, QFileDialog, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMessageBox, QSplitter,
                                QStackedWidget, QToolButton, QTreeWidget, QTreeWidgetItem)
 
@@ -39,10 +39,12 @@ class EditCommand(QUndoCommand):
     def redo(self):
         self.edit.apply()
         self.window.target = self.edit.target
+        self.window.origin = self.window.pushing       # None for a redo: it always jumps to its target
 
     def undo(self):
         self.edit.revert()
         self.window.target = self.edit.target
+        self.window.origin = None
 
 
 class MainWindow(QMainWindow):
@@ -58,6 +60,7 @@ class MainWindow(QMainWindow):
         self.notation = {}            # module name -> [notation Line or None] per rule
         self.target = None            # what the last edit, undo or redo changed (Edit.target)
         self.shape = None             # the names and counts the tree shows
+        self.origin = self.pushing = None   # (tree item data) the view a new edit was made in
         self.refusal = ''             # why the last edit was refused (try_edit)
         self.undo = QUndoStack(self)
         self.undo.indexChanged.connect(self._changed)
@@ -176,6 +179,7 @@ class MainWindow(QMainWindow):
         """save to the open file; a file in bin/ is saved elsewhere (Save As). -> True if saved"""
         if self.f is None:
             return False
+        self._commit_editor()
         if BIN in self.path.resolve().parents:
             return self.save_as()
         return self.write(self.path)
@@ -183,8 +187,15 @@ class MainWindow(QMainWindow):
     def save_as(self):
         if self.f is None:
             return False
+        self._commit_editor()
         path = self.ask_save_path()
         return bool(path) and self.write(Path(path))
+
+    def _commit_editor(self):
+        """an open field or cell editor commits when it loses focus: do that before saving"""
+        w = QApplication.focusWidget()
+        if w is not None:
+            w.clearFocus()
 
     def ask_save_path(self):
         """the path to save to, or '' (a dialog; replaced in tests)"""
@@ -225,6 +236,7 @@ class MainWindow(QMainWindow):
 
     def maybe_save(self):
         """-> True if the window may drop the open file: no unsaved changes, saved, or discarded"""
+        self._commit_editor()
         if self.f is None or self.undo.isClean():
             return True
         answer = self.ask_unsaved()
@@ -247,7 +259,11 @@ class MainWindow(QMainWindow):
         if isinstance(result, tuple):
             result, extra = result
         if result is not None:
-            self.undo.push(EditCommand(result, self))
+            self.pushing = (self._current(),)
+            try:
+                self.undo.push(EditCommand(result, self))
+            finally:
+                self.pushing = None
         return extra
 
     def _shape(self):
@@ -271,9 +287,19 @@ class MainWindow(QMainWindow):
     def refresh(self):
         """show the current item again with the model's values, then the edit's target"""
         target, self.target = self.target, None
+        origin, self.origin = self.origin, None
         self.show_item(self.tree.currentItem())
-        if target is not None:
+        if target is not None and not self._moved_on(origin):
             self.show_target(target)
+
+    def _moved_on(self, origin):
+        """True if the user chose another tree item since the edit was made (committing a
+        field by clicking elsewhere): the edit then does not take them back"""
+        if origin is None:
+            return False
+        before, now = origin[0], self._current()
+        return not (before is now or (before is not None and now is not None
+                                      and before[0] == now[0] and before[1] is now[1]))
 
     def _problems(self):
         problems = check(self.f)

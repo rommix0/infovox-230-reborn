@@ -137,7 +137,7 @@ Known limitations:
 python -m unittest discover -s editor/tests -t editor -v
 ```
 
-This runs the editor's tests. `make editor-test` builds `ivxsay` first and runs them too, so the relocation and Speak tests are not skipped; `make test` includes it. The model, writer and checks use the Python 3.13 standard library only. The GUI needs PySide6 and numpy (`pip install -r editor/requirements.txt`); its tests run offscreen and skip when PySide6 is missing.
+This runs the editor's tests. `make editor-test` builds `ivxsay` first and runs them too, so the relocation and Speak tests are not skipped; `make test` includes it. The model, writer, checks and edits use the Python 3.13 standard library only. The GUI needs PySide6 and numpy (`pip install -r editor/requirements.txt`); its tests run offscreen and skip when PySide6 is missing.
 
 ```bash
 python editor/ivxedit.pyw bin/swrules.ivx

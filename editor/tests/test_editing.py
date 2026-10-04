@@ -287,6 +287,33 @@ class EditingTest(unittest.TestCase):
         self.assertEqual(w.f.param(PNAMES.index('F0'))[2], 7)
         self.assertEqual(w.undo.count(), 2)
 
+    def test_committing_by_clicking_elsewhere_stays_there(self):
+        """a field commits on focus-out as the user clicks another tree node: no jump back"""
+        from ivxedit.gui.mainwindow import ROLE
+        w = self.win
+        w.open_file(ivx_path('sw'))
+        a = next(p for p in w.f.phonemes if p.name == b'A:')
+        w.show_phoneme(a)
+        w.phoneme_view.name.setText('A2')
+        w.phoneme_view.name.editingFinished.emit()             # the edit is pushed ...
+        params = self.node('params')                           # ... then the user's click, before the event loop
+        settle()
+        self.assertIs(w.tree.currentItem(), params)
+        self.assertEqual((w.undo.count(), a.name), (1, b'A2'))
+        self.node('header')
+        field = w.header_view.widgets['Version']
+        field.setText('typed')
+        field.editingFinished.emit()
+        chars = self.node('chars')
+        settle()
+        self.assertIs(w.tree.currentItem(), chars)
+        w.undo.undo()                                          # undo and redo do show their target
+        settle()
+        self.assertEqual(w.tree.currentItem().data(0, ROLE)[0], 'header')
+        w.undo.undo()
+        settle()
+        self.assertIs(w.tree.currentItem(), w.ph_items[a])
+
     def test_buttons_belong_to_their_table(self):
         w = self.win
         w.open_file(ivx_path('sw'))

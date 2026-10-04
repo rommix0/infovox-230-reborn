@@ -1,4 +1,5 @@
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,6 +60,19 @@ class SaveTest(unittest.TestCase):
         self.assertTrue(check(f) and all(p.warning for p in check(f)))
         save(f, self.dir / 'x.ivx')
         self.assertEqual((self.dir / 'x.ivx').read_bytes(), to_bytes(f))
+
+    def test_failed_replace_leaves_no_temporary_file(self):
+        out = self.dir / 'sw.ivx'
+        out.write_bytes(b'old')
+        os.chmod(out, stat.S_IREAD)
+        try:
+            try:
+                save(load(ivx_bytes('sw')), out)
+            except OSError:
+                pass                                # replacing a read-only file fails on Windows
+            self.assertEqual([p.name for p in self.dir.glob('*.tmp')], [])
+        finally:
+            os.chmod(out, stat.S_IWRITE | stat.S_IREAD)
 
     @unittest.skipUnless(os.name == 'posix', 'permission bits are POSIX')
     def test_saved_file_mode(self):

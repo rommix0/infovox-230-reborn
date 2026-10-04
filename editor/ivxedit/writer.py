@@ -1,6 +1,7 @@
 """IvxFile -> .ivx bytes (spec: Writer)."""
 import os
 import shutil
+import stat
 import struct
 import tempfile
 from pathlib import Path
@@ -112,5 +113,6 @@ def save(f, path):
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
+            os.chmod(tmp, stat.S_IWRITE | stat.S_IREAD)     # it may have the read-only mode of the target
             os.unlink(tmp)
         raise

@@ -111,7 +111,7 @@ def _check_inventory(f, out):
         except (TypeError, ValueError, AttributeError):
             out.append(Problem(ph_label(ph), 'malformed record', ('phoneme', ph)))
         name = getattr(ph, 'name', None)
-        if name_ok(name) and not ph.is_defaults:
+        if name_ok(name):                       # the defaults record's name counts too
             if name in first:
                 out.append(Problem(ph_label(ph), 'the name is also phoneme %d\'s; the engine finds '
                                    'the first one by name' % first[name], ('phoneme', ph), True))
