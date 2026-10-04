@@ -185,7 +185,7 @@ def _pads(b, spans):
     return pads
 
 
-def load(data):
+def _load(data):
     """bytes of an .ivx file -> IvxFile"""
     if len(data) < HDR_SIZE + INV:
         raise IvxFormatError('file too short')
@@ -227,3 +227,13 @@ def load(data):
                 raise IvxFormatError('H[2] outside the indexed lexicon region')
     f.pads, f.end_pad = _pads(b, spans), end_pad
     return f
+
+
+def load(data):
+    """bytes of an .ivx file -> IvxFile; raises IvxFormatError for anything it cannot read"""
+    try:
+        return _load(data)
+    except IvxFormatError:
+        raise
+    except (IndexError, ValueError, struct.error) as e:
+        raise IvxFormatError('cannot read the file: %s' % e) from e

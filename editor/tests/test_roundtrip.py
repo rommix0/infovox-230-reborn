@@ -1,5 +1,7 @@
+import random
 import unittest
 
+from ivxedit.binfmt import IvxFormatError
 from ivxedit.model import PNAMES, load
 from ivxedit.writer import to_bytes
 from tests.util import LANGS, ivx_bytes, ivx_path, tools_import
@@ -45,6 +47,20 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(lex[0], (b' ', b'es'))                # REFERENCE §5.7
         self.assertIn((b'%', b"PROS'ENT"), lex)
         self.assertEqual(len(lex), 3370)
+
+    def test_corrupt_files_raise_ivx_format_error(self):
+        for lang in ('sw', 'da', 'fr'):
+            data = ivx_bytes(lang)
+            rng = random.Random(lang)
+            for trial in range(20):
+                bad = bytearray(data)
+                for _ in range(16):
+                    bad[rng.randrange(0x200, len(bad))] = rng.randrange(256)
+                with self.subTest(lang=lang, trial=trial):
+                    try:
+                        load(bytes(bad))
+                    except IvxFormatError:
+                        pass
 
 
 if __name__ == '__main__':
