@@ -150,6 +150,8 @@ Examples (`swrules.ivx`):
 
 The status bar shows the coverage per module, e.g. "M0: 5,214 / 5,714 in rule notation".
 
+**As built in step 3** (plan `docs/superpowers/plans/2026-10-04-ivxedit-step3-rule-notation.md`): the grammar is `editor/ivxedit/NOTATION.md`. 15,526 of the 15,564 shipped rules are in notation; the other 38 are the 23 `GEMIN` rules, 2 with `CHEAD`/`CTAIL`, the 8 that name the inventory's terminator and the 5 carrying `REPL` words. Several actions are groups separated by `;` (`A → B [+b20] ; C →⁺ D`), each after the first starting one segment further on (`REPL+`, `SETF+`); the `⁺` marker is on the arrow, for `SETF+` too. Left context matched after `CPREV` is written before `⟵` (`#818 ∅ → # / [+b16]{3} ⟵ _ A D R E S S`). `·` is a pattern with no parts (any segment), `A → ∅ ↺` is `UNWRAP`, and phoneme names that would read as syntax are written `‹name›`. The rules view tints the rules left in instruction form; View ▸ Instruction form shows every rule that way. The instruction-form parser is `listing.parse_rule`.
+
 ## GUI (`gui/`, steps 2–5)
 
 ```

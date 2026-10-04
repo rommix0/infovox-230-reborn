@@ -1,7 +1,8 @@
-"""The rules view: one module, one rule per line in instruction form, highlighted;
-double-click a phoneme to jump to it."""
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextCursor, QTextFormat
+"""The rules view: one module, one rule per line, in rule notation where it says the rule
+exactly and in instruction form otherwise (those lines tinted); highlighted; double-click
+a phoneme to jump to it."""
+from PySide6.QtGui import (QColor, QSyntaxHighlighter, QTextBlockFormat, QTextCharFormat, QTextCursor,
+                           QTextFormat)
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit
 
 from ..listing import rule_line
@@ -10,6 +11,7 @@ from .views import mono
 PREFIX = '%5d  '          # the rule index, as in the Problems panel's "M0 rule 12"
 COLOURS = {'op': '#1f5fbf', 'ph': '#a0400a', 'num': '#2a7f2a', 'feat': '#7a2a9a',
            'param': '#8a6d00', 'raw': '#c00000'}
+FALLBACK = QColor('#f1ece0')   # background of a rule shown in instruction form for want of notation
 
 
 class _Highlighter(QSyntaxHighlighter):
@@ -38,16 +40,33 @@ class RulesView(QPlainTextEdit):
         self.setReadOnly(True)
         self.setFont(mono())
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.lines = []
+        self.document().setUndoRedoEnabled(False)
+        self.lines = []                   # the Line shown for each rule
         self.module = None
+        self.notation = []                # per rule: its Line in notation, or None
+        self.instruction_form = False     # show every rule in instruction form
         self._hl = _Highlighter(self.document(), self)
 
-    def set_module(self, name, module):
-        if module is self.module:
-            return
-        self.module = module
-        self.lines = [rule_line(r) for r in module.rules]
+    def set_module(self, name, module, notation):
+        """show module; notation: per rule, its notation Line or None (notation.notation_line)"""
+        self.module, self.notation = module, notation
+        self._fill()
+
+    def set_instruction_form(self, on):
+        if on != self.instruction_form:
+            self.instruction_form = on
+            self._fill()
+
+    def _fill(self):
+        rules = self.module.rules if self.module is not None else []
+        self.lines = [n if n is not None and not self.instruction_form else rule_line(r)
+                      for r, n in zip(rules, self.notation)]
         self.setPlainText('\n'.join(PREFIX % i + ln.text for i, ln in enumerate(self.lines)))
+        tint = QTextBlockFormat()
+        tint.setBackground(FALLBACK)
+        for i, n in enumerate(self.notation):
+            if n is None:
+                QTextCursor(self.document().findBlockByNumber(i)).setBlockFormat(tint)
 
     def ref_at(self, rule, col):
         """the PhRef at column `col` of rule line `rule`, or None"""

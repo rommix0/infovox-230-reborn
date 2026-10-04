@@ -71,13 +71,50 @@ class SmokeTest(unittest.TestCase):
         w.show_phoneme(ref.ph)
         self.assertIs(w.tree.currentItem(), w.ph_items[plus])
 
-    def test_rules_view_shows_instruction_form(self):
+    def test_rules_view_shows_notation(self):
+        from ivxedit.gui.rulesview import FALLBACK, PREFIX
+        from ivxedit.listing import ph_names
+        from ivxedit.notation import notation_line
         w = self.win
         w.open_file(ivx_path('sw'))
         w.show_rule('M0', 0)
-        text = w.rule_views['M0'].toPlainText().splitlines()
-        self.assertEqual(len(text), len(w.f.modules['M0'].rules))
-        self.assertIn('RULE SEEK + ; R B ; REPL del 2 -> S ; NEXT #32', '\n'.join(text))
+        view, rules = w.rule_views['M0'], w.f.modules['M0'].rules
+        names = ph_names(w.f.phonemes)
+        shown = [notation_line(r, names) is not None for r in rules]
+        self.assertEqual(w.coverage.text(), 'M0: %s / %s rules in notation' % (
+            format(sum(shown), ','), format(len(rules), ',')))
+        text = view.toPlainText().splitlines()
+        self.assertEqual(len(text), len(rules))
+        self.assertEqual(text[0], PREFIX % 0 + '#32 + B → S')
+        # the rules notation cannot say: instruction form, on a tinted background
+        self.assertIn(False, shown)
+        for i, t in enumerate(text):
+            tinted = view.document().findBlockByNumber(i).blockFormat().background().color() == FALLBACK
+            with self.subTest(rule=i):
+                self.assertEqual(tinted, not shown[i])
+                self.assertEqual(t.startswith(PREFIX % i + 'RULE'), not shown[i])
+        # View ▸ Instruction form, for the open views and the ones made later
+        w.instr_action.setChecked(True)
+        self.assertEqual(view.toPlainText().splitlines()[0], PREFIX % 0 + 'RULE SEEK + ; R B ; REPL del 2 -> S ; NEXT #32')
+        w.show_rule('M1', 0)
+        self.assertTrue(all(t.startswith(PREFIX % i + 'RULE')
+                            for i, t in enumerate(w.rule_views['M1'].toPlainText().splitlines())))
+        w.instr_action.setChecked(False)
+        self.assertEqual(view.toPlainText().splitlines()[0], PREFIX % 0 + '#32 + B → S')
+
+    def test_rules_table_counts_notation(self):
+        from ivxedit.listing import ph_names
+        from ivxedit.notation import notation_line
+        w = self.win
+        w.open_file(ivx_path('fr'))
+        w.tree.setCurrentItem(next(t for t in w.items() if t.text(0) == 'Rules'))
+        model = w.table_view.model
+        self.assertEqual(model.headers, ['Module', 'Rules', 'In notation', 'RULE*', 'Lead word'])
+        names = ph_names(w.f.phonemes)
+        for row in model.rows:
+            rules = w.f.modules[row[0]].rules
+            self.assertEqual(row[2], str(sum(notation_line(r, names) is not None for r in rules)))
+        self.assertEqual(w.coverage.text(), '')
 
     def test_bad_file_raises(self):
         with tempfile.TemporaryDirectory() as d:

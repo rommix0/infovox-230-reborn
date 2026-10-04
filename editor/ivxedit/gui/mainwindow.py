@@ -9,7 +9,9 @@ from PySide6.QtWidgets import (QFileDialog, QLabel, QMainWindow, QMessageBox, QS
 from ..binfmt import IvxFormatError
 from ..checks import check
 from ..info import a1_text, char_rows, flags_text, header_fields, hexdump, ph_name, unknown_text
+from ..listing import ph_names
 from ..model import PNAMES, load
+from ..notation import notation_line
 from ..xref import phoneme_uses
 from .phonemeview import PhonemeView
 from .rulesview import RulesView
@@ -28,6 +30,8 @@ class MainWindow(QMainWindow):
         self.ph_items = {}            # Phoneme -> its tree item
         self.module_items = {}        # module name -> its tree item
         self.rule_views = {}          # module name -> RulesView, per open file
+        self.names = {}               # ph_names of the open file
+        self.notation = {}            # module name -> [notation Line or None] per rule
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.currentItemChanged.connect(lambda cur, prev: self.show_item(cur))
@@ -51,6 +55,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main)
         self.problems = QLabel()
         self.statusBar().addWidget(self.problems)
+        self.coverage = QLabel()      # the shown module's rules in notation
+        self.statusBar().addWidget(self.coverage)
         self._menus()
         self.resize(1200, 800)
         self._title()
@@ -65,6 +71,11 @@ class MainWindow(QMainWindow):
                 a.setShortcut(key)
             a.triggered.connect(slot)
             m.addAction(a)
+        self.instr_action = QAction('&Instruction form', self)
+        self.instr_action.setCheckable(True)
+        self.instr_action.setShortcut(QKeySequence('Ctrl+I'))
+        self.instr_action.toggled.connect(self.set_instruction_form)
+        self.menuBar().addMenu('&View').addAction(self.instr_action)
 
     def _title(self):
         self.setWindowTitle('IVX Editor' + (' — %s' % self.path.name if self.path else ''))
@@ -92,6 +103,7 @@ class MainWindow(QMainWindow):
         problems = check(f)
         self.f, self.path = f, Path(path)
         self.uses = uses
+        self.names, self.notation = ph_names(f.phonemes), {}
         for v in self.rule_views.values():
             self.stack.removeWidget(v)
             v.deleteLater()
@@ -156,6 +168,7 @@ class MainWindow(QMainWindow):
             return
         kind, obj = item.data(0, ROLE)
         f = self.f
+        self.coverage.setText('')
         if kind == 'header':
             self.header_view.set_fields(header_fields(f))
             self.stack.setCurrentWidget(self.header_view)
@@ -176,12 +189,15 @@ class MainWindow(QMainWindow):
             self.phoneme_view.set_phoneme(obj, self.uses.get(obj, []), f.modules)
             self.stack.setCurrentWidget(self.phoneme_view)
         elif kind == 'rules':
-            rows = [[n, len(m.rules), sum(r.iterative for r in m.rules), '0x%04x' % m.lead]
-                    for n, m in sorted(f.modules.items())]
-            self._table('Rule modules (REFERENCE §5.5)', ['Module', 'Rules', 'RULE*', 'Lead word'],
+            rows = [[n, len(m.rules), self._in_notation(n), sum(r.iterative for r in m.rules),
+                     '0x%04x' % m.lead] for n, m in sorted(f.modules.items())]
+            self._table('Rule modules (REFERENCE §5.5)',
+                        ['Module', 'Rules', 'In notation', 'RULE*', 'Lead word'],
                         rows, [('module', n) for n in sorted(f.modules)])
         elif kind == 'module':
             self.stack.setCurrentWidget(self._rules_view(obj))
+            self.coverage.setText('%s: %s / %s rules in notation' % (
+                obj, format(self._in_notation(obj), ','), format(len(f.modules[obj].rules), ',')))
         elif kind == 'chars':
             rows = [['0x%02x' % ch, c, '' if code is None else code,
                      '(built-in)' if fl is None else flags_text(fl), '' if xl is None else xl]
@@ -205,13 +221,28 @@ class MainWindow(QMainWindow):
         self.text_view.setPlainText(text)
         self.stack.setCurrentWidget(self.text_view)
 
+    def _notation(self, name):
+        """[notation Line or None] for each rule of module `name`, made once per file"""
+        if name not in self.notation:
+            self.notation[name] = [notation_line(r, self.names) for r in self.f.modules[name].rules]
+        return self.notation[name]
+
+    def _in_notation(self, name):
+        return sum(n is not None for n in self._notation(name))
+
     def _rules_view(self, name):
         if name not in self.rule_views:
             v = RulesView(self.show_phoneme)
-            v.set_module(name, self.f.modules[name])
+            v.set_instruction_form(self.instr_action.isChecked())
+            v.set_module(name, self.f.modules[name], self._notation(name))
             self.stack.addWidget(v)
             self.rule_views[name] = v
         return self.rule_views[name]
+
+    def set_instruction_form(self, on):
+        """View ▸ Instruction form: every rule in instruction form, or notation where it exists"""
+        for v in self.rule_views.values():
+            v.set_instruction_form(on)
 
     def _activate(self, data):
         kind, obj = data
