@@ -3,7 +3,7 @@ import unittest
 
 from ivxedit.listing import MNEMONICS, rule_line
 from ivxedit.model import Phoneme, PhRef, load
-from ivxedit.rules import Instr, Rule
+from ivxedit.rules import Instr, Rule, rep_split
 from tests.util import LANGS, ivx_bytes
 
 A = Phoneme(b'A:', 0, 0, [])
@@ -55,6 +55,7 @@ class ListingTest(unittest.TestCase):
         self.assertEqual(line(Instr(0x40, [1, 2])), 'RULE SEEK #0001 #0002')
         self.assertEqual(line(Instr(0x1234, [PhRef(A)])), 'RULE ?1234 A:')
         self.assertEqual(line(Instr(0xBC, [0x0124, PhRef(A)])), 'RULE REPL #0124 A:')
+        self.assertEqual(line(Instr(0xBC, [0x0001])), 'RULE REPL #0001')
 
     def test_spans(self):
         ln = rule_line(Rule(False, [Instr(0x40, [PhRef(PLUS)]), Instr(0x10, [32])]))
@@ -78,6 +79,36 @@ class ListingTest(unittest.TestCase):
                         self.assertNotIn('#', ''.join(ln.text[s:e] for s, e, k, _ in ln.spans if k == 'param'))
                         self.assertTrue(kinds <= {'op', 'ph', 'num', 'feat', 'param'})
         self.assertEqual(n, 15564)
+
+    def test_repl_words_print_distinctly(self):
+        texts = set()
+        for w in range(0x2000):
+            d, n = rep_split(w)
+            text = line(Instr(0xBC, [w] + [PhRef(A)] * n))
+            texts.add(text)
+        self.assertEqual(len(texts), 0x2000)
+
+    def test_ld_st_words_print_distinctly(self):
+        rng = random.Random(2)
+        texts_by_args = {}
+        for _ in range(3000):
+            op = rng.choice([0x100, 0x104, 0x108, 0x10C])
+            spec = rng.randrange(0x10000)
+            index = rng.randrange(0x10000)
+            args = [spec] if spec & 0x80 else [spec, index]
+            text = line(Instr(op, args))
+            key = (op, tuple(args))
+            if key in texts_by_args:
+                self.assertEqual(text, texts_by_args[key], msg=f"Duplicate text for {key}")
+            else:
+                texts_by_args[key] = text
+        # Check no two distinct (op, args) give the same text
+        texts = {}
+        for (op, args), text in texts_by_args.items():
+            if text not in texts:
+                texts[text] = (op, args)
+            else:
+                self.fail(f"Text '{text}' produced by both {texts[text]} and {(op, args)}")
 
     def test_never_raises(self):
         rng = random.Random(1)

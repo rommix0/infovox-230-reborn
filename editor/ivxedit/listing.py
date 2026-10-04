@@ -132,7 +132,7 @@ def _pattern(o, ws):
     """a pattern: header word, then [phoneme] [V M] [tests]"""
     o.tok('{')
     h = ws[0] if ws else None
-    parts, i = [], 1
+    i = 1
     ok = isinstance(h, int) and not h & 0x1001 and (h & 0x0FFE) // 2 == len(ws)
     if ok and h & 0x8000:
         ok = i < len(ws) and isinstance(ws[i], PhRef)
@@ -194,7 +194,10 @@ def _shaped(ins):
     if op in (0x6C, 0x9C):
         return len(a) >= 2 and isinstance(a[0], int) and isinstance(a[1], int)
     if op in (REPL, REPL_NEXT):
-        return len(a) >= 1 and isinstance(a[0], int) and rep_split(a[0])[1] == len(a) - 1
+        if not (len(a) >= 1 and isinstance(a[0], int)):
+            return False
+        d, n = rep_split(a[0])
+        return n == len(a) - 1 and d * 256 + 12 * n == a[0]
     if op in LDST_OPS:
         return not phs and len(a) == (1 if a and a[0] & 0x80 else 2)
     return False
