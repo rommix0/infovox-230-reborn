@@ -1,9 +1,24 @@
 """IvxFile -> .ivx bytes (spec: Writer)."""
+import os
+import shutil
 import struct
+import tempfile
+from pathlib import Path
 
 from .binfmt import INV, SLOTS, TABLES, align16, pack_words
+from .checks import check
 from .model import MODULE_DIR
 from .rules import encode_module
+
+BIN = Path(__file__).resolve().parents[2] / 'bin'   # the shipped files: never written
+
+
+class SaveRefused(Exception):
+    """check() found problems; nothing was written"""
+
+    def __init__(self, problems):
+        super().__init__('%d problem(s): %s' % (len(problems), '; '.join(map(str, problems[:5]))))
+        self.problems = problems
 
 
 def lexicon_bytes(lex):
@@ -58,3 +73,26 @@ def to_bytes(f):
     header = bytearray(f.header)
     header[8:12] = struct.pack('>I', len(body))
     return bytes(header) + bytes(body)
+
+
+def save(f, path):
+    """check f, then write it to path through a temporary file in the same folder; an
+    existing file is kept as <name>.bak"""
+    path = Path(path).resolve()
+    if BIN in path.parents:
+        raise PermissionError('%s is in bin/, which holds the shipped files' % path)
+    problems = check(f)
+    if problems:
+        raise SaveRefused(problems)
+    data = to_bytes(f)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + '.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'wb') as out:
+            out.write(data)
+        if path.exists():
+            shutil.copy2(path, path.with_name(path.name + '.bak'))
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
