@@ -114,6 +114,7 @@ class ChecksTest(unittest.TestCase):
         self.assertEqual([(p.target, p.warning) for p in probs], [(('phoneme', e), True)])
         self.assertIn("also phoneme %d's" % f.phonemes.index(a), probs[0].message)
         self.assertEqual(errors(probs), [])
+
     def test_build_tag(self):
         f = sw()
         f.head = b'XX' + f.head[2:]
