@@ -1,6 +1,7 @@
 import random
 import unittest
 
+from ivxedit.checks import check
 from ivxedit.listing import MNEMONICS, ParseError, parse_rule, ph_names, ph_text, rule_line, words
 from ivxedit.model import Phoneme, PhRef, load
 from ivxedit.rules import Instr, Rule, rep_split
@@ -155,6 +156,23 @@ class ParseTest(unittest.TestCase):
                         self.assertEqual(words(parse_rule(rule_line(r).text, names)), words(r))
         self.assertEqual(n, 15564)
 
+    def test_legacy_repl_flag_and_checks_survive(self):
+        # a REPL word with a carry (5 in the shipped files) is read back as legacy, so checks
+        # report nothing for an unchanged rule
+        legacy = 0
+        for lang in LANGS:
+            f = load(ivx_bytes(lang))
+            names, before = ph_names(f.phonemes), check(f)
+            for name, m in f.modules.items():
+                for i, r in enumerate(m.rules):
+                    new = parse_rule(rule_line(r).text, names)
+                    self.assertEqual([x.legacy for x in new.instrs], [x.legacy for x in r.instrs],
+                                     (lang, name, i))
+                    legacy += sum(x.legacy for x in r.instrs)
+                    m.rules[i] = new
+            self.assertEqual(check(f), before, lang)
+        self.assertEqual(legacy, 5)
+
     def test_operand_kinds_read_back(self):
         for ins in (Instr(0x40, [PhRef(A)]), Instr(0x4C, [PhRef(SPACE)]), Instr(0x4C, [PhRef(None)]),
                     Instr(0x4C, [PhRef(A, 4)]), Instr(0x4C, [0x7000]), Instr(0xC4, [0x0010, 0, 0x0110, 0]),
@@ -181,6 +199,22 @@ class ParseTest(unittest.TestCase):
             with self.subTest(text=text):
                 with self.assertRaises(ParseError):
                     parse_rule(text, NAMES)
+
+    def test_refusals_of_offsets_and_long_numbers(self):
+        big = '9' * 5000
+        for text in ('RULE SEEK A:+99999', 'RULE SEEK A:+65536', 'RULE SEEK A:+0', 'RULE SEEK A:+00',
+                     'RULE SEEK A:+01', 'RULE A= ' + big, 'RULE REPL del ' + big + ' -> A:',
+                     'RULE REPL del 1 -> A:+' + big, 'RULE LD F1@' + big, 'RULE LD F1@0 t=' + big,
+                     'RULE LD F1@0 t=-' + big, 'RULE RP ' + big + ',0 { + }',
+                     'RULE RP 0,' + big + ' { + }', 'RULE A= -' + big, 'RULE ?' + big,
+                     'RULE NEXT #' + big, 'RULE 5/2^' + big, 'RULE FOCUSP { <F1 < ' + big + '> }'):
+            with self.subTest(text=text[:40]):
+                with self.assertRaises(ParseError):
+                    parse_rule(text, NAMES)
+        self.assertEqual(parse_rule('RULE SEEK A:+65535', NAMES).instrs[0].args[0].delta, 0xFFFF)
+        with self.assertRaises(ParseError) as cm:
+            parse_rule('RULE SEEK A:+99999', NAMES)
+        self.assertEqual(cm.exception.pos, 13)
 
     def test_error_column(self):
         with self.assertRaises(ParseError) as cm:

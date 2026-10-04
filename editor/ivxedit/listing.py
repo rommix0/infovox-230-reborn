@@ -37,7 +37,7 @@ from .binfmt import pack_words
 from .info import item_name, ph_name, s8
 from .model import PhRef
 from .rules import (FIXED, PH_OPS, REPL, REPL_NEXT, Instr, Rule, encode_rule, operand_count,
-                    ph_positions, rep_split)
+                    ph_positions, rep_carries, rep_split)
 
 MNEMONICS = {
     0x00: 'END', 0x04: 'BEGIN', 0x10: 'NEXT', 0x40: 'SEEK', 0x44: 'FOCUS', 0x48: 'SCAN',
@@ -286,9 +286,17 @@ def ph_names(phonemes):
     return names
 
 
+def dec(text, pos):
+    """a decimal number -> int; refuses digit strings far past anything a word holds, before
+    int() (Python limits int(str) to 4300 digits)"""
+    if len(text.lstrip('-')) > 10:
+        raise ParseError('%s... is too long a number' % text[:12], pos)
+    return int(text)
+
+
 def u16(text, pos):
     """a decimal operand -> its word; -32768..65535"""
-    v = int(text)
+    v = dec(text, pos)
     if not -0x8000 <= v <= 0xFFFF:
         raise ParseError('%s does not fit in 16 bits' % text, pos)
     return v & 0xFFFF
@@ -319,8 +327,11 @@ def phoneme(tok, pos, names):
     if tok in names:
         return PhRef(names[tok])
     for k in (2, 1):
-        if tok[k:k + 1] == '+' and tok[:k] in names and re.fullmatch('[0-9]+', tok[k + 1:]):
-            return PhRef(names[tok[:k]], int(tok[k + 1:]))
+        if tok[k:k + 1] == '+' and tok[:k] in names and re.fullmatch('[1-9][0-9]*', tok[k + 1:]):
+            d = dec(tok[k + 1:], pos + k + 1)
+            if d > 0xFFFF:
+                raise ParseError('the offset +%d does not fit in 16 bits' % d, pos + k + 1)
+            return PhRef(names[tok[:k]], d)
     raise ParseError('no phoneme %r' % tok, pos)
 
 
@@ -382,10 +393,10 @@ def ldst_words(toks):
     iid, t = ITEM_IDS[m.group(1)], 0
     if len(toks) == 2:
         tt, tp = toks[1]
-        if not (tt.startswith('t=') and DEC.fullmatch(tt[2:]) and -128 <= int(tt[2:]) <= 127
-                and int(tt[2:])):
+        if not (tt.startswith('t=') and DEC.fullmatch(tt[2:]) and -128 <= dec(tt[2:], tp) <= 127
+                and dec(tt[2:], tp)):
             raise ParseError('expected t=N with N in -128..127, not 0', tp)
-        t = int(tt[2:]) & 0xFF
+        t = dec(tt[2:], tp) & 0xFF
     spec = t << 8 | iid
     if iid >= 0x80:
         if m.group(2) or m.group(3):
@@ -395,7 +406,7 @@ def ldst_words(toks):
         return [spec, int(m.group(2), 16)]
     if m.group(3) is None:
         raise ParseError('a parameter needs an index @k', p)
-    k = int(m.group(3))
+    k = dec(m.group(3), p)
     if not -64 <= k <= 63:
         raise ParseError('the index %d is not in -64..63' % k, p)
     return [spec, (2 * k & 0xFF) << 8 | (0x80 if m.group(4) else 0)]
@@ -414,14 +425,14 @@ def _shaped_args(op, toks, names):
         m = re.fullmatch(r'([0-9]+),([0-9]+)', t[0]) if t else None
         if not (m and len(t) >= 3 and t[1] == '{' and t[-1] == '}'):
             return None
-        lo, hi = int(m.group(1)), int(m.group(2))
+        lo, hi = dec(m.group(1), toks[0][1]), dec(m.group(2), toks[0][1])
         if lo > 255 or hi > 255:
             raise ParseError('a count is more than 255', toks[0][1])
         return [lo << 8 | hi] + _read_pattern(toks[2:-1], names)
     if op in (REPL, REPL_NEXT):
         if not (len(t) >= 3 and t[0] == 'del' and re.fullmatch('[0-9]+', t[1]) and t[2] == '->'):
             return None
-        d, ids = int(t[1]), [phoneme(x, p, names) for x, p in toks[3:]]
+        d, ids = dec(t[1], toks[1][1]), [phoneme(x, p, names) for x, p in toks[3:]]
         w = d * 256 + 12 * len(ids)
         if w > 0xFFFF or rep_split(w) != (d, len(ids)):
             raise ParseError('del %d with %d phonemes does not fit a REPL word' % (d, len(ids)),
@@ -453,6 +464,8 @@ def _read_instr(text, pos, names):
         args = [phoneme(x, p, names) for x, p in rest]
     ins = Instr(op, args)
     check_shape(ins, mp)
+    if op in (REPL, REPL_NEXT) and isinstance(args[0], int) and rep_carries(args[0]):
+        ins.legacy = True   # as decode_instr marks it: the shipped files have 5 such words
     return ins
 
 
