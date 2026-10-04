@@ -95,6 +95,16 @@ class EditTest(unittest.TestCase):
                 edits.set_header_text(f, field, text)
         self.assertIsNone(edits.set_header_text(f, 'version', 'v2 ÅÄÖ'))
 
+    def test_header_text_unchanged_is_no_edit(self):
+        """the text a view shows, set again, changes nothing (icrules keeps bytes after the NUL)"""
+        for lang in LANGS:
+            f = load(ivx_bytes(lang))
+            shown = dict(header_fields(f))
+            for label, field in (('Version', 'version'), ('Copyright', 'copyright'),
+                                 ('Lexicon name', 'lexicon name')):
+                with self.subTest(lang=lang, field=field):
+                    self.assertIsNone(edits.set_header_text(f, field, shown[label]))
+
     def test_params(self):
         f = sw()
         i = PNAMES.index('F0')

@@ -72,6 +72,8 @@ def set_header_text(f, field, text):
     b = latin1(text, field)
     if b'\0' in b or len(b) > size - 1:
         raise EditError('%s: at most %d characters, without NUL' % (field, size - 1))
+    if f.header[off:off + size].split(b'\0')[0] == b:     # the text is there; bytes after its NUL stay
+        return None
     header = f.header[:off] + b + bytes(size - len(b)) + f.header[off + size:]
     return _edit(f, 'header', header, 'Set the %s' % field, ('header',))
 

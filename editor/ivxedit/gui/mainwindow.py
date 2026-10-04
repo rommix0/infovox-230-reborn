@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         self.notation = {}            # module name -> [notation Line or None] per rule
         self.target = None            # what the last edit, undo or redo changed (Edit.target)
         self.shape = None             # the names and counts the tree shows
+        self.refusal = ''             # why the last edit was refused (try_edit)
         self.undo = QUndoStack(self)
         self.undo.indexChanged.connect(self._changed)
         self.undo.cleanChanged.connect(lambda clean: self._title())
@@ -239,7 +240,8 @@ class MainWindow(QMainWindow):
         try:
             result = fn(*args)
         except EditError as e:
-            self.statusBar().showMessage(str(e), 10000)
+            self.refusal = str(e)
+            self.statusBar().showMessage(self.refusal, 10000)
             return False
         extra = True
         if isinstance(result, tuple):
@@ -298,9 +300,11 @@ class MainWindow(QMainWindow):
 
     def _header_edit(self, key, text):
         if key == 'flags':
-            self.try_edit(edits.set_header_flags, self.f, text)
+            ok = self.try_edit(edits.set_header_flags, self.f, text)
         else:
-            self.try_edit(edits.set_header_text, self.f, key, text)
+            ok = self.try_edit(edits.set_header_text, self.f, key, text)
+        if not ok:                                    # refused: the field shows the model's value again
+            self.show_item(self.tree.currentItem())
 
     def _lex_edit(self, i, word, trans):
         k = self.try_edit(edits.set_entry, self.f.lexicon, i, word, trans)
@@ -321,8 +325,8 @@ class MainWindow(QMainWindow):
     def _phoneme_action(self, action, ph):
         f = self.f
         if action == 'delete':
-            if ph is not None:
-                self.try_edit(edits.delete_phoneme, f, ph)
+            if ph is not None and not self.try_edit(edits.delete_phoneme, f, ph):
+                self.warn('Delete phoneme', self.refusal)     # the rule list is too long for the status bar
             return
         at = len(f.phonemes) if ph is None else f.phonemes.index(ph) + 1
         model = ph if action == 'copy' and ph is not None and not ph.is_defaults else None

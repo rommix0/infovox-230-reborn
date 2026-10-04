@@ -175,6 +175,17 @@ class EditingTest(unittest.TestCase):
         w.table_view.buttons['Delete'].click()
         settle()
         self.assertIn('used by', w.statusBar().currentMessage())
+        self.assertEqual(len(self.warnings), 1)                # the full rule list in a dialog
+        self.assertIn('used by', self.warnings[0])
+        self.assertIn('M0 rule', self.warnings[0])
+        self.node('header')
+        hv = w.header_view
+        shown = {k: hv.widgets[k].text() for k in ('Version', 'Flags')}
+        for label, bad in (('Flags', 'zz'), ('Version', 'x' * 64), ('Version', '→')):
+            hv.widgets[label].setText(bad)
+            hv.widgets[label].editingFinished.emit()
+            settle()
+            self.assertEqual(hv.widgets[label].text(), shown[label])
         self.node('params')
         self.cell(w.table_view.model, 0, 3, '40')
         self.assertIn('A1 type must be 0..32', w.statusBar().currentMessage())
