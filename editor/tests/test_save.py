@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from ivxedit.checks import check
 from ivxedit.model import Phoneme, load
 from ivxedit.writer import SaveRefused, save, to_bytes
 from tests.util import ROOT, ivx_bytes
@@ -27,7 +28,7 @@ class SaveTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ['sw.ivx', 'sw.ivx.bak'])
 
     def test_refuses_bin(self):
-        target = ROOT / 'bin' / 'ivxedit-test.ivx'
+        target = ROOT / 'bin' / 'nonexistent' / 'ivxedit-test.ivx'
         with self.assertRaises(PermissionError):
             save(load(ivx_bytes('sw')), target)
         self.assertFalse(target.exists())
@@ -38,6 +39,16 @@ class SaveTest(unittest.TestCase):
         with self.assertRaises(SaveRefused) as cm:
             save(f, self.dir / 'x.ivx')
         self.assertTrue(cm.exception.problems)
+        self.assertEqual(list(self.dir.iterdir()), [])
+
+    def test_save_refuses_a_file_that_does_not_reload(self):
+        f = load(ivx_bytes('sw'))
+        ins = next(x for m in f.modules.values() for r in m.rules for x in r.instrs
+                   if x.op == 0x100 and len(x.args) == 2)
+        ins.args.append(0x5555)                                # one operand too many for an LD
+        self.assertEqual(check(f), [])                         # check() cannot see this one
+        with self.assertRaises(SaveRefused):
+            save(f, self.dir / 'x.ivx')
         self.assertEqual(list(self.dir.iterdir()), [])
 
 

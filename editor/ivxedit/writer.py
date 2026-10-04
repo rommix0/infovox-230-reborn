@@ -5,9 +5,9 @@ import struct
 import tempfile
 from pathlib import Path
 
-from .binfmt import INV, SLOTS, TABLES, align16, pack_words
-from .checks import check
-from .model import MODULE_DIR
+from .binfmt import INV, SLOTS, TABLES, IvxFormatError, align16, pack_words
+from .checks import Problem, check
+from .model import MODULE_DIR, load
 from .rules import encode_module
 
 BIN = Path(__file__).resolve().parents[2] / 'bin'   # the shipped files: never written
@@ -85,6 +85,12 @@ def save(f, path):
     if problems:
         raise SaveRefused(problems)
     data = to_bytes(f)
+    try:
+        again = to_bytes(load(data))
+    except IvxFormatError as e:
+        raise SaveRefused([Problem('file', 'the written file does not load again: %s' % e)]) from e
+    if again != data:
+        raise SaveRefused([Problem('file', 'the written file does not read back the same')])
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + '.', suffix='.tmp')
     try:
         with os.fdopen(fd, 'wb') as out:
