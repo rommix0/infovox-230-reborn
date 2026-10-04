@@ -359,6 +359,8 @@ def delete_rule(f, name, i):
 def move_rule(f, name, i, step):
     """rule i moved up (step -1) or down (1); None at either end of the module"""
     m = _module(f, name, i, False)
+    if step not in (-1, 1):
+        raise EditError('a rule moves one place at a time, not %s' % step)
     j = i + step
     if not 0 <= j < len(m.rules):
         return None

@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self.target = None            # what the last edit, undo or redo changed (Edit.target)
         self.shape = None             # the names and counts the tree shows
         self.origin = self.pushing = None   # (tree item data) the view a new edit was made in
+        self.row = None               # the rules view's current line after the last edit
         self.refusal = ''             # why the last edit was refused (try_edit)
         self.undo = QUndoStack(self)
         self.undo.indexChanged.connect(self._changed)
@@ -284,14 +285,23 @@ class MainWindow(QMainWindow):
         self.uses = phoneme_uses(self.f)              # rule edits change "Used by"
         self._problems()
         self._title()
+        self.row = self._row()
         self._refresh_timer.start(0)                  # not inside the signal of the edited widget
+
+    def _row(self):
+        """the current line of the rules view on show, else None"""
+        v = self.stack.currentWidget()
+        return v.textCursor().blockNumber() if isinstance(v, RulesView) else None
 
     def refresh(self):
         """show the current item again with the model's values, then the edit's target"""
         target, self.target = self.target, None
         origin, self.origin = self.origin, None
+        row = self._row()
         self.show_item(self.tree.currentItem())
-        if target is not None and not self._moved_on(origin):
+        # not if the user went elsewhere since the edit: another item, or (committing by a
+        # click) another line of the rules view
+        if target is not None and not self._moved_on(origin) and row == self.row:
             self.show_target(target)
 
     def _moved_on(self, origin):

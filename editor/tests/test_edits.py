@@ -298,7 +298,8 @@ class RuleEditTest(unittest.TestCase):
         n = len(f.modules['M0'].rules)
         for call in (lambda: edits.set_rule(f, 'M0', n, rule), lambda: edits.set_rule(f, 'M9', 0, rule),
                      lambda: edits.insert_rule(f, 'M0', n + 1, rule), lambda: edits.insert_rule(f, 'M0', -1, rule),
-                     lambda: edits.delete_rule(f, 'M0', n), lambda: edits.move_rule(f, 'M0', -1, 1)):
+                     lambda: edits.delete_rule(f, 'M0', n), lambda: edits.move_rule(f, 'M0', -1, 1),
+                     lambda: edits.move_rule(f, 'M0', 1, 0), lambda: edits.move_rule(f, 'M0', 1, 2)):
             with self.assertRaises(EditError):
                 call()
         self.assertIsNotNone(edits.insert_rule(f, 'M0', n, rule))

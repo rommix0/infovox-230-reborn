@@ -109,6 +109,95 @@ class RuleEditingTest(unittest.TestCase):
         self.key(v.editor, 'Escape')
         self.assertEqual((v.editor, v.document().blockCount(), self.win.undo.count()), (None, n, 0))
 
+    def activate(self):
+        """show the window and give it the focus (offscreen, nothing has it otherwise)"""
+        from PySide6.QtWidgets import QApplication
+        self.win.show()
+        self.win.activateWindow()
+        settle()
+        self.view.setFocus()
+        settle()
+        self.assertIs(QApplication.focusWidget(), self.view)
+
+    def test_focus_out_commit_leaves_the_focus(self):
+        # clicking another widget commits the line and the focus stays where the user put it
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        w, v = self.win, self.view
+        self.activate()
+        v.edit_rule(0)
+        settle()
+        self.assertIs(QApplication.focusWidget(), v.editor)
+        v.editor.setText('#1 L -> M / _ O')
+        box = w.speak.text
+        box.setFocus(Qt.FocusReason.MouseFocusReason)
+        settle()
+        self.assertEqual((w.undo.count(), v.editor), (1, None))
+        self.assertIs(QApplication.focusWidget(), box)
+
+    def test_enter_and_escape_return_the_focus_to_the_view(self):
+        from PySide6.QtWidgets import QApplication
+        v = self.view
+        self.activate()
+        for key in ('Return', 'Escape'):
+            v.edit_rule(0)
+            settle()
+            self.assertIs(QApplication.focusWidget(), v.editor)
+            self.key(v.editor, key)
+            self.assertIs(QApplication.focusWidget(), v)
+
+    def test_an_empty_new_line_goes_when_the_focus_does(self):
+        from PySide6.QtCore import Qt
+        w, v, n = self.win, self.view, len(self.m.rules)
+        self.activate()
+        v.insert_rule()
+        settle()
+        self.assertEqual(v.document().blockCount(), n + 1)
+        w.speak.text.setFocus(Qt.FocusReason.MouseFocusReason)
+        settle()
+        self.assertEqual((v.editor, v.document().blockCount(), w.undo.count()), (None, n, 0))
+        self.assertEqual(w.statusBar().currentMessage(), '')
+
+    def test_escape_on_the_view_closes_an_open_editor(self):
+        v, n = self.view, len(self.m.rules)
+        v.insert_rule()
+        self.key(v, 'Escape')
+        self.assertEqual((v.editor, v.document().blockCount(), self.win.undo.count()), (None, n, 0))
+
+    def test_insert_on_a_blank_line_stays_there(self):
+        # a new line that did not read is left open; Insert on it starts again in the same place
+        v, n = self.view, len(self.m.rules)
+        v.goto_rule(2)
+        v.insert_rule()
+        v.editor.setText('#1 L -> QQ / _ O')
+        self.assertFalse(v.commit())
+        v.setFocus()
+        v.insert_rule()
+        self.assertEqual((v.blank, v.editor.i, v.document().blockCount()), (3, 3, n + 1))
+
+    def test_commit_by_clicking_another_rule_does_not_jump_back(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QTextCursor
+        from PySide6.QtTest import QTest
+        w, v = self.win, self.view
+        self.activate()
+        v.edit_rule(3)
+        settle()
+        v.editor.setText('#1 L -> M / _ O')
+        cur = QTextCursor(v.document().findBlockByNumber(10))
+        cur.setPosition(cur.position() + 1)
+        QTest.mouseClick(v.viewport(), Qt.MouseButton.LeftButton, pos=v.cursorRect(cur).center())
+        settle()
+        self.assertEqual(w.undo.count(), 1)
+        self.assertEqual(v.current(), 10)
+
+    def test_commit_by_enter_keeps_the_cursor_on_the_rule(self):
+        v = self.view
+        v.goto_rule(3)
+        v.edit_rule(3)
+        self.type_line('#1 L -> M / _ O')
+        self.assertEqual((self.win.undo.count(), v.current()), (1, 3))
+
     def test_copy_move_delete(self):
         w, v, m = self.win, self.view, self.m
         old = list(m.rules)

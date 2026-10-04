@@ -209,6 +209,8 @@ class RulesView(QPlainTextEdit):
             return
         i = self.current()
         at = len(self.rules) if i is None else i + 1
+        if i is None and self.blank is not None:
+            at = self.blank                         # on the line of a new rule: start again there
         self.close_editor(refill=False)
         self.blank = at
         self._fill()
@@ -242,6 +244,10 @@ class RulesView(QPlainTextEdit):
         ed = self.editor
         if ed is None:
             return True
+        if ed.adding and not ed.text().strip():     # nothing typed on the new line: no rule
+            self.status('')
+            self.close_editor()
+            return True
         try:
             rule = edits.read_rule(ed.text(), self.names)
         except ParseError as e:
@@ -259,9 +265,11 @@ class RulesView(QPlainTextEdit):
         """drop the open editor (and the line of a new rule) without an edit"""
         ed, self.editor = self.editor, None
         if ed is not None:
+            had = ed.hasFocus()                 # not after a click elsewhere: the focus stays there
             ed.hide()
             ed.deleteLater()
-            self.setFocus()
+            if had:
+                self.setFocus()
         if self.blank is not None:
             self.blank = None
             if refill:
@@ -286,6 +294,8 @@ class RulesView(QPlainTextEdit):
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.edit is not None:
             self.edit_rule()
+        elif event.key() == Qt.Key.Key_Escape and self.editor is not None:
+            self.close_editor()
         else:
             super().keyPressEvent(event)
 
