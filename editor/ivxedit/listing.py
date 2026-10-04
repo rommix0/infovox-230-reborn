@@ -37,7 +37,7 @@ from .binfmt import pack_words
 from .info import item_name, ph_name, s8
 from .model import PhRef
 from .rules import (FIXED, PH_OPS, REPL, REPL_NEXT, Instr, Rule, encode_rule, operand_count,
-                    ph_positions, rep_carries, rep_split)
+                    ph_positions, rep_split)
 
 MNEMONICS = {
     0x00: 'END', 0x04: 'BEGIN', 0x10: 'NEXT', 0x40: 'SEEK', 0x44: 'FOCUS', 0x48: 'SCAN',
@@ -465,9 +465,7 @@ def _read_instr(text, pos, names):
         args = [phoneme(x, p, names) for x, p in rest]
     ins = Instr(op, args)
     check_shape(ins, mp)
-    if op in (REPL, REPL_NEXT) and isinstance(args[0], int) and rep_carries(args[0]):
-        ins.legacy = True   # as decode_instr marks it: the shipped files have 5 such words
-    return ins
+    return ins      # never legacy: edits.set_rule keeps the mark of an unchanged shipped REPL
 
 
 def check_shape(ins, pos):

@@ -1,7 +1,7 @@
-"""Edits of the voice data (spec: GUI, step 4). Each function checks its input and returns
-an Edit, which replaces one attribute of a model object with a new value, or None when
-the value is already there. Values are replaced, never changed in place, so undo (putting
-the old value back) is exact."""
+"""Edits of the voice data and the rules (spec: GUI, steps 4 and 5). Each function checks its
+input and returns an Edit, which replaces one attribute of a model object with a new value,
+or None when the value is already there. Values are replaced, never changed in place, so
+undo (putting the old value back) is exact."""
 import bisect
 import re
 import string
@@ -9,7 +9,10 @@ import struct
 from dataclasses import dataclass
 
 from .checks import ph_label, rule_label
+from .listing import ParseError, parse_rule, words
 from .model import PNAMES, ParamItem, Phoneme, VarItem
+from .notation import parse_notation
+from .rules import REPL, REPL_NEXT, Instr, Rule
 from .xref import phoneme_uses
 
 # header text fields: offset, size (the text is NUL-terminated, so size - 1 characters fit)
@@ -286,3 +289,80 @@ def remove_entry(lex, i):
     word = lex.entries[i][0].decode('latin-1')
     return Edit(lex, 'entries', entries, 'Remove the entry %r' % word,
                 ('lexicon', max(0, min(i, len(entries) - 1))))
+
+
+# --- rules: a module's rule list is replaced as a whole
+def read_rule(text, names):
+    """a rule as typed -> Rule: instruction form when the line starts with RULE or RULE*,
+    notation otherwise (names from listing.ph_names); raises listing.ParseError"""
+    body, lead = text.strip(), len(text) - len(text.lstrip())
+    try:
+        if body.split(' ', 1)[0] in ('RULE', 'RULE*'):
+            return parse_rule(body, names)
+        return parse_notation(body, names)
+    except ParseError as e:
+        raise ParseError(e.message, None if e.pos is None else e.pos + lead) from None
+
+
+def _module(f, name, i, end):
+    """f.modules[name]; i must index one of its rules (or, with end, be one past the last)"""
+    m = f.modules.get(name)
+    if m is None:
+        raise EditError('there is no module %s' % name)
+    if not 0 <= i < len(m.rules) + end:
+        raise EditError('%s has no rule %d' % (name, i))
+    return m
+
+
+def _iwords(ins):
+    return (ins.op,) + tuple(a if isinstance(a, int) else (id(a.ph), a.delta) for a in ins.args)
+
+
+def _marked(rule, old):
+    """rule, each REPL marked legacy if old has the same REPL marked so: an unedited carrying
+    word of a shipped file stays exempt from the checks, and any other is new and refused"""
+    kept = {_iwords(x) for x in old.instrs if x.legacy} if old is not None else set()
+    for x in rule.instrs:
+        x.legacy = x.op in (REPL, REPL_NEXT) and _iwords(x) in kept
+    return rule
+
+
+def copy_rule(rule):
+    """a new Rule with the same instructions"""
+    return Rule(rule.iterative, [Instr(x.op, list(x.args)) for x in rule.instrs])
+
+
+def set_rule(f, name, i, rule):
+    """rule i of module `name` becomes rule (from read_rule)"""
+    m = _module(f, name, i, False)
+    old = m.rules[i]
+    if words(rule) == words(old):
+        return None
+    rules = m.rules[:i] + [_marked(rule, old)] + m.rules[i + 1:]
+    return Edit(m, 'rules', rules, 'Edit %s' % rule_label(name, i, old), ('rule', name, i))
+
+
+def insert_rule(f, name, i, rule):
+    """rule inserted as rule i of module `name` (i up to its number of rules)"""
+    m = _module(f, name, i, True)
+    rules = m.rules[:i] + [_marked(rule, None)] + m.rules[i:]
+    return Edit(m, 'rules', rules, 'Insert %s rule %d' % (name, i), ('rule', name, i))
+
+
+def delete_rule(f, name, i):
+    m = _module(f, name, i, False)
+    rules = m.rules[:i] + m.rules[i + 1:]
+    return Edit(m, 'rules', rules, 'Delete %s' % rule_label(name, i, m.rules[i]),
+                ('rule', name, max(0, min(i, len(rules) - 1))))
+
+
+def move_rule(f, name, i, step):
+    """rule i moved up (step -1) or down (1); None at either end of the module"""
+    m = _module(f, name, i, False)
+    j = i + step
+    if not 0 <= j < len(m.rules):
+        return None
+    rules = list(m.rules)
+    rules[i], rules[j] = rules[j], rules[i]
+    return Edit(m, 'rules', rules, 'Move %s %s' % (rule_label(name, i, m.rules[i]), 'up' if step < 0 else 'down'),
+                ('rule', name, j))

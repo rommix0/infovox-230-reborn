@@ -1,12 +1,15 @@
-"""Voice-data edits (spec: GUI, step 4): each edit changes what it says, undo restores the
-bytes exactly, and the edited file saves and loads again."""
+"""Edits (spec: GUI, steps 4 and 5): each edit changes what it says, undo restores the bytes
+exactly, and the edited file saves and loads again."""
+import re
 import unittest
 
 from ivxedit import edits
 from ivxedit.checks import check, errors
 from ivxedit.edits import EditError
 from ivxedit.info import a1_text, header_fields
+from ivxedit.listing import ParseError, ph_names, rule_line, words
 from ivxedit.model import PNAMES, ParamItem, VarItem, load
+from ivxedit.notation import notation_line
 from ivxedit.writer import to_bytes
 from ivxedit.xref import phoneme_uses
 from tests.util import LANGS, ivx_bytes
@@ -242,6 +245,78 @@ class EditTest(unittest.TestCase):
         for text in ('', '5a', '0x', '²', '1' * 11, '5.0', '0x123456789'):
             with self.subTest(text=text), self.assertRaises(EditError):
                 edits.number(text, -10 ** 12, 10 ** 12, 'n')
+
+
+class RuleEditTest(unittest.TestCase):
+    def test_read_rule(self):
+        # notation or instruction form, by the first word; columns count the leading spaces
+        f = sw()
+        names = ph_names(f.phonemes)
+        rule = edits.read_rule('#1 L → M / _ O', names)
+        self.assertEqual(rule_line(rule).text, 'RULE SEEK L ; R O ; REPL del 1 -> M ; NEXT #1')
+        self.assertEqual(words(edits.read_rule('  RULE SEEK L ; R O ; REPL del 1 -> M ; NEXT #1 ', names)),
+                         words(rule))
+        for text in ('  #1 L → QQ / _ O', '  RULE SEEK L ; R QQ ; NEXT #1'):
+            with self.subTest(text=text), self.assertRaises(ParseError) as cm:
+                edits.read_rule(text, names)
+            self.assertEqual(cm.exception.pos, text.index('QQ'))
+
+    def test_rule_edits_undo(self):
+        # spec: Testing, 11, for rules: each edit does what it says; undo restores the bytes
+        f = sw()
+        names, m, before = ph_names(f.phonemes), f.modules['M0'], to_bytes(f)
+        r0, r1, n = m.rules[0], m.rules[1], len(m.rules)
+        done = []
+
+        def do(e, target):
+            self.assertEqual(e.target, target)
+            e.apply()
+            done.append(e)
+        do(edits.insert_rule(f, 'M0', 0, edits.read_rule('#1 L → M / _ O', names)), ('rule', 'M0', 0))
+        self.assertEqual(notation_line(m.rules[0], names).text, '#1 L → M / _ O')
+        do(edits.set_rule(f, 'M0', 0, edits.read_rule('#2 L → M / _ A', names)), ('rule', 'M0', 0))
+        self.assertIsNone(edits.set_rule(f, 'M0', 0, edits.read_rule('#2 L → M / _ A', names)))
+        do(edits.move_rule(f, 'M0', 0, 1), ('rule', 'M0', 1))
+        self.assertIs(m.rules[0], r0)
+        self.assertIsNone(edits.move_rule(f, 'M0', 0, -1))
+        self.assertIsNone(edits.move_rule(f, 'M0', n, 1))
+        do(edits.insert_rule(f, 'M0', 3, edits.copy_rule(r1)), ('rule', 'M0', 3))
+        self.assertEqual(words(m.rules[3]), words(r1))
+        do(edits.delete_rule(f, 'M0', n + 1), ('rule', 'M0', n))
+        self.assertEqual(len(m.rules), n + 1)
+        self.assertEqual(errors(check(f)), [])
+        again = load(to_bytes(f))
+        self.assertEqual([rule_line(x).text for x in again.modules['M0'].rules],
+                         [rule_line(x).text for x in m.rules])
+        for e in reversed(done):
+            e.revert()
+        self.assertEqual(to_bytes(f), before)
+
+    def test_rule_refusals(self):
+        f = sw()
+        rule = edits.read_rule('#1 L → M / _ O', ph_names(f.phonemes))
+        n = len(f.modules['M0'].rules)
+        for call in (lambda: edits.set_rule(f, 'M0', n, rule), lambda: edits.set_rule(f, 'M9', 0, rule),
+                     lambda: edits.insert_rule(f, 'M0', n + 1, rule), lambda: edits.insert_rule(f, 'M0', -1, rule),
+                     lambda: edits.delete_rule(f, 'M0', n), lambda: edits.move_rule(f, 'M0', -1, 1)):
+            with self.assertRaises(EditError):
+                call()
+        self.assertIsNotNone(edits.insert_rule(f, 'M0', n, rule))
+
+    def test_carrying_repl_words(self):
+        # a shipped carrying REPL word stays exempt while it is unchanged; a copy is new and refused
+        f = load(ivx_bytes('da'))
+        names = ph_names(f.phonemes)
+        name, i, r = next((n, i, r) for n, m in sorted(f.modules.items()) for i, r in enumerate(m.rules)
+                          if any(x.legacy for x in r.instrs))
+        text = rule_line(r).text
+        self.assertFalse(any(x.legacy for x in edits.read_rule(text, names).instrs))
+        relabelled = re.sub(r'NEXT #[0-9]+$', 'NEXT #9999', text)
+        self.assertNotEqual(relabelled, text)
+        edits.set_rule(f, name, i, edits.read_rule(relabelled, names)).apply()
+        self.assertEqual(check(f), [])
+        edits.insert_rule(f, name, i + 1, edits.copy_rule(f.modules[name].rules[i])).apply()
+        self.assertEqual([p.target for p in check(f)], [('rule', name, i + 1)])
 
 
 if __name__ == '__main__':

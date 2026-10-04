@@ -1,7 +1,6 @@
 import random
 import unittest
 
-from ivxedit.checks import check
 from ivxedit.listing import MNEMONICS, ParseError, parse_rule, ph_names, ph_text, rule_line, words
 from ivxedit.model import Phoneme, PhRef, load
 from ivxedit.rules import Instr, Rule, rep_split
@@ -156,22 +155,19 @@ class ParseTest(unittest.TestCase):
                         self.assertEqual(words(parse_rule(rule_line(r).text, names)), words(r))
         self.assertEqual(n, 15564)
 
-    def test_legacy_repl_flag_and_checks_survive(self):
-        # a REPL word with a carry (5 in the shipped files) is read back as legacy, so checks
-        # report nothing for an unchanged rule
-        legacy = 0
+    def test_typed_lines_are_never_legacy(self):
+        # only a loaded file marks a carrying REPL word legacy (5 rules); a line read back
+        # does not (edits.set_rule keeps the mark of an unchanged one)
+        n = 0
         for lang in LANGS:
             f = load(ivx_bytes(lang))
-            names, before = ph_names(f.phonemes), check(f)
-            for name, m in f.modules.items():
-                for i, r in enumerate(m.rules):
-                    new = parse_rule(rule_line(r).text, names)
-                    self.assertEqual([x.legacy for x in new.instrs], [x.legacy for x in r.instrs],
-                                     (lang, name, i))
-                    legacy += sum(x.legacy for x in r.instrs)
-                    m.rules[i] = new
-            self.assertEqual(check(f), before, lang)
-        self.assertEqual(legacy, 5)
+            names = ph_names(f.phonemes)
+            for m in f.modules.values():
+                for r in m.rules:
+                    if any(x.legacy for x in r.instrs):
+                        n += 1
+                        self.assertFalse(any(x.legacy for x in parse_rule(rule_line(r).text, names).instrs))
+        self.assertEqual(n, 5)
 
     def test_operand_kinds_read_back(self):
         for ins in (Instr(0x40, [PhRef(A)]), Instr(0x4C, [PhRef(SPACE)]), Instr(0x4C, [PhRef(None)]),
