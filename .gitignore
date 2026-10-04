@@ -20,6 +20,3 @@ __pycache__/
 /session_memory.json
 /.superpowers/
 .claude/settings.local.json
-
-# infovox original binaries
-/bin/
