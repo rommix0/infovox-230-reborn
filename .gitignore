@@ -20,3 +20,6 @@ __pycache__/
 /session_memory.json
 /.superpowers/
 .claude/settings.local.json
+
+# xtra goodies
+xtras/
