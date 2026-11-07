@@ -28,7 +28,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define IVX_VERSION 0x00010001   /* major << 16 | minor */
+#define IVX_VERSION 0x00010002   /* major << 16 | minor */
 
 #if defined(_WIN32)
 #  ifdef IVX_BUILD

@@ -24,13 +24,17 @@ make dist     # release archive in dist/
 ## Usage
 
 ```bash
-ivxsay -l sw "God morgon."              # speak through the speaker
-ivxsay -l ge -o hallo.wav "Guten Tag."  # write a WAV file
-echo "Hello." | ivxsay -l bl            # read from stdin
+ivxsay -l bin/swrules.ivx "God morgon."              # speak through the speaker
+ivxsay -l ivx22/gerules.ivx -o hallo.wav "Hallo."    # write a WAV file
+echo "Hello." | ivxsay -l ivx22/blrules.ivx          # read from stdin
 ```
 
+`-l` takes the path of a language file: `bin/` has the 12 earlier ones, `ivx22/` the
+12 from the v2.2 release (a release build has them in `lang/v1.12/` and `lang/v2.2/`).
+A relative path is tried from the current directory, then from `ivxsay`'s folder.
 Languages: `sw` `no` `da` `fi` `ic` `ge` `du` `fr` `it` `sp` `bl` (British English)
-`am` (American English). Run `ivxsay` with no arguments for all options.
+`am` (American English), as `<code>rules.ivx`. Run `ivxsay` with no arguments for all
+options.
 
 The library API (`include/infovox230.h`) is a pull-based stream: create an engine,
 `ivx_feed` UTF-8 text, `ivx_read` samples and events (marks, phonemes, done), with

@@ -29,9 +29,9 @@ static volatile sig_atomic_t interrupted;
 static void usage(void)
 {
     fprintf(stderr,
-        "usage: ivxsay -l LANG [options] [text ...]\n"
-        "  -l LANG   .ivx file, or a language code (sw, no, da, fi, ic, ge, du, fr, it, sp, bl, am)\n"
-        "            for bin/<code>rules.ivx, else lang/<code>rules.ivx next to ivxsay\n"
+        "usage: ivxsay -l FILE.ivx [options] [text ...]\n"
+        "  -l FILE   the language's .ivx file, e.g. lang/v2.2/swrules.ivx; a relative path\n"
+        "            is tried from the current directory, then from ivxsay's own folder\n"
         "  -o FILE   write a WAV file instead of playing through the speaker\n"
         "  -i FILE   read the text from FILE (default: the arguments, else stdin)\n"
         "  -e ENC    text encoding: utf8 (default) or cp1252\n"
@@ -273,16 +273,13 @@ int main(int argc, char **argv)
         || (events && set(e, IVX_EVENT_MASK, IVX_EVMASK_ALL, "event mask")))
         return 1;
     r = ivx_load_language(e, lang);
-    if (r == IVX_E_IO && strlen(lang) == 2) {
-        snprintf(path, sizeof path, "bin/%srules.ivx", lang);
-        r = ivx_load_language(e, path);
-        if (r == IVX_E_IO) {    /* a release folder: lang/ next to the executable */
-            char dir[400];
-            exe_dir(dir, sizeof dir);
-            if (dir[0]) {
-                snprintf(path, sizeof path, "%slang/%srules.ivx", dir, lang);
-                r = ivx_load_language(e, path);
-            }
+    /* a relative path not found here: try it from ivxsay's folder (a release's lang/) */
+    if (r == IVX_E_IO && lang[0] != '/' && lang[0] != '\\' && !(lang[0] && lang[1] == ':')) {
+        char dir[400];
+        exe_dir(dir, sizeof dir);
+        if (dir[0]) {
+            snprintf(path, sizeof path, "%s%s", dir, lang);
+            r = ivx_load_language(e, path);
         }
     }
     if (r != 0) {

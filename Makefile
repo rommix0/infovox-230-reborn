@@ -139,11 +139,12 @@ DIST    = dist/infovox230-$(VERSION)-$(PLAT)
 
 dist: $(LIB) $(B)/ivxsay$(EXE) cli/README.dist.txt include/infovox230.h
 	rm -rf $(DIST) $(DIST).zip $(DIST).tar.gz
-	mkdir -p $(DIST)/lang $(DIST)/sdk
+	mkdir -p $(DIST)/lang/v1.12 $(DIST)/lang/v2.2 $(DIST)/sdk
 	cp $(B)/ivxsay$(EXE) $(LIB) $(DIST)/
 	strip $(DIST)/ivxsay$(EXE)
 	strip --strip-unneeded $(DIST)/$(notdir $(LIB))
-	cp bin/*.ivx $(DIST)/lang/
+	cp bin/*.ivx $(DIST)/lang/v1.12/
+	cp ivx22/*.ivx $(DIST)/lang/v2.2/
 	cp include/infovox230.h $(DIST)/sdk/
 	cp cli/README.dist.txt $(DIST)/README.txt
 ifeq ($(OS),Windows_NT)
