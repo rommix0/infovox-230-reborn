@@ -11,7 +11,13 @@ from .checks import Problem, check, errors
 from .model import MODULE_DIR, load
 from .rules import encode_module
 
-BIN = Path(__file__).resolve().parents[2] / 'bin'   # the shipped files: never written
+ROOT = Path(__file__).resolve().parents[2]
+SHIPPED = (ROOT / 'bin', ROOT / 'ivx22')   # the shipped files: never written
+
+
+def shipped(path):
+    """True for a path in bin/ or ivx22/"""
+    return any(d in Path(path).resolve().parents for d in SHIPPED)
 
 
 class SaveRefused(Exception):
@@ -89,8 +95,8 @@ def save(f, path):
     """check f, then write it to path through a temporary file in the same folder; an
     existing file is kept as <name>.bak. Warnings do not stop a save."""
     path = Path(path).resolve()
-    if BIN in path.parents:
-        raise PermissionError('%s is in bin/, which holds the shipped files' % path)
+    if shipped(path):
+        raise PermissionError('%s is in bin/ or ivx22/, which hold the shipped files' % path)
     problems = errors(check(f))
     if problems:
         raise SaveRefused(problems)

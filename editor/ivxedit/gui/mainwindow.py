@@ -16,7 +16,7 @@ from ..info import a1_text, char_rows, flags_text, header_fields, hexdump, ph_na
 from ..listing import ph_names
 from ..model import PNAMES, load
 from ..notation import notation_line
-from ..writer import BIN, SaveRefused, save
+from ..writer import SaveRefused, save, shipped
 from ..xref import phoneme_uses
 from .phonemeview import PhonemeView
 from .rulesview import RulesView
@@ -177,11 +177,11 @@ class MainWindow(QMainWindow):
             self.settings.setValue('ivxsay', path)
 
     def save(self):
-        """save to the open file; a file in bin/ is saved elsewhere (Save As). -> True if saved"""
+        """save to the open file; a file in bin/ or ivx22/ is saved elsewhere (Save As). -> True if saved"""
         if self.f is None:
             return False
         self._commit_editor()
-        if BIN in self.path.resolve().parents:
+        if shipped(self.path):
             return self.save_as()
         return self.write(self.path)
 

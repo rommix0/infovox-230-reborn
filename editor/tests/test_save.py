@@ -30,10 +30,11 @@ class SaveTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ['sw.ivx', 'sw.ivx.bak'])
 
     def test_refuses_bin(self):
-        target = ROOT / 'bin' / 'nonexistent' / 'ivxedit-test.ivx'
-        with self.assertRaises(PermissionError):
-            save(load(ivx_bytes('sw')), target)
-        self.assertFalse(target.exists())
+        for d in ('bin', 'ivx22'):
+            target = ROOT / d / 'nonexistent' / 'ivxedit-test.ivx'
+            with self.assertRaises(PermissionError):
+                save(load(ivx_bytes('sw')), target)
+            self.assertFalse(target.exists())
 
     def test_refused_save_writes_nothing(self):
         f = load(ivx_bytes('sw'))

@@ -1157,6 +1157,27 @@ Example (`swrules.ivx` M0, rule #32): `SEEK + ; R B ; REPL del 2 -> S`, i.e. the
 
 The same instruction set decodes every file, including the "NEW op-codes" ones.
 
+**`ivx22/`: the Infovox 230 v2.2 release (Feb 2002)** [CONFIRMED]. `Infovox230v2_2complete.exe` (InstallShield 6) carries newer files for all 12 languages, as uncompressed files next to its cabinets (7-Zip opens the outer archive):
+
+| File | Version string | Lexicon (H[3]) entries |
+|---|---|---|
+| amrules.ivx | American English v.4.0 2002-02-18 | 118,944 |
+| blrules.ivx | British English v.3.2 991125 "extended lexicon" | 10,964 |
+| darules.ivx | Danish v.4.0 2002-02-18 "Compiled without normalizer" | 251,452 |
+| durules.ivx | Dutch v.1.2 991125 "LARGE lexicon" | 67,919 |
+| firules.ivx | Finnish v.1.3 991216 | none (indexed lexicon) |
+| frrules.ivx | French v.2.26 2000-01-17 "extended lexicon" | 4,970 |
+| gerules.ivx | German v.4.0 2002-02-18 | 13,510 |
+| icrules.ivx | Icelandic v.4.0 2002-02-11 | 2,453 |
+| itrules.ivx | Italian v.1.2 2000-11-07 "Windows; extended lexicon" | 209,500 |
+| norules.ivx | Norwegian v.4.0 2002-02-11 | 53,499 |
+| sprules.ivx | Castilian Spanish v.1.1 2001-04-25 | none (indexed lexicon) |
+| swrules.ivx | Swedish v.3.7 2000-11-01 "Windows - Extended lexicon" | 118,462 |
+
+- Same format: all 12 load in `ivxedit.model` with no problems, and all 17,426 rules decode with the `bin/` opcode table, with no opcode that the `bin/` files don't use.
+- The port is bit-exact against the v1.1 `bin/Ivx230nt.dll` on them: `cw_cmp`, `op_cmp` and `tts_cmp` give 0 failures (2,239 module runs; 20.5 M samples, text to audio). `tp_cmp` gives one, in Icelandic "pool 80 h+n" (pools 78–80) at offset 856 of the stress text. There the port's compaction GUARD in `tp_putc` fires (`text_cur` 62 bytes back, 50 kept). The DLL rewinds `text_cur` 12 bytes before `Core.text` and passes the word `\xFF` to the user dictionary callback, so the difference is the DLL's bug (§2.2.2). To run the tests on them, use a directory with the `bin/` DLL, `sx32w.dll` and these files, and put it on PATH (otherwise `LoadLibrary` fails with error 126).
+- The same installer's engine, `Ivx230nt.dll` v2.2.0.0 (2002-02-07, MSVC 6, 372,736 bytes, in `data2.cab`, an InstallShield v6 cabinet), is not ported. What is known: its data tables match ours, moved by +0x158, except `tp_charset2` (more ANSI characters mapped) and `op_rate_table` (one more entry). `tts_ctrl` has a 35th command, 0x22, which returns 0x65. Only 70 of the 254 named functions match byte-for-byte, which is expected after a compiler change, so whether its code differs is [NOT FOUND]. The files above may therefore sound slightly different in the v2.2 engine [HYPOTHESIS].
+
 ---
 
 ## 6. Cross-reference summary
